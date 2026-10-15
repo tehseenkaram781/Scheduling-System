@@ -1,0 +1,1532 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Time Ops — every hour, accounted for</title>
+<meta name="description" content="Weekly timesheets, role-aware approvals, and dashboards that reconcile. For teams that need the hours to hold up.">
+
+<!--
+  STANDALONE MARKETING PAGE — not part of the application.
+
+  Deliberately does NOT follow the app's no-CDN / no-framework rule: this file
+  loads Three.js from a CDN for the hero centrepiece. Nothing here is imported
+  by the app, and the app imports nothing from here. It shares only the brand
+  lockup and the lime accent, restated locally rather than pulled from
+  styles.css so the two can diverge without either breaking the other.
+
+  The wordmark is a PLACEHOLDER, matching the app sidebar's treatment; rename
+  in one place (.wordmark spans) when the real name lands.
+
+  No build step. Open it and it works. If the CDN is unreachable the Three.js
+  module simply never runs and the CSS clock underneath stays visible — the
+  hero degrades instead of going blank.
+-->
+
+<style>
+  /* ---------------------------------------------------------------------
+     Tokens. Lime is the accent ONLY — buttons, the clock's glow, active
+     states. Everything structural is black/neutral, same restraint the app
+     uses. Flooding the composition with lime is what makes it stop reading
+     as an accent at all.
+     --------------------------------------------------------------------- */
+  :root {
+    --ink:        #08090B;
+    --ink-2:      #0E1013;
+    --panel:      #121519;
+    --panel-2:    #171B20;
+    --line:       #23282F;
+    --line-soft:  #1A1E24;
+
+    --text:       #F2F4EF;
+    --text-2:     #A8AEA4;
+    --text-3:     #6E756C;
+
+    --lime:       #B8D633;
+    --lime-bright:#D6F170;
+    --lime-deep:  #7E9A22;
+    --lime-glow:  rgba(184, 214, 51, .55);
+
+    --radius:     16px;
+    --radius-lg:  24px;
+    --maxw:       1180px;
+    /* Height of the sticky nav. It OVERLAYS each slide rather than pushing
+       content down, so anything that wants to look centred on screen has to
+       subtract it — see .hero's padding-top. */
+    --nav-h:      68px;
+
+    --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, Roboto,
+            "Helvetica Neue", Arial, sans-serif;
+    --mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  /* ---------------------------------------------------------------------
+     Deck / snap scrolling.
+
+     Two mechanisms, deliberately split by input device:
+
+       TOUCH  — native CSS scroll snap. Hand-rolled touch hijacking fights
+                the platform's own momentum and always feels a frame behind;
+                native snap is smooth, interruptible and correct by default.
+                `scroll-snap-stop: always` is what stops a hard fling from
+                flying past several slides.
+
+       WHEEL / KEYS — intercepted in JS, because native snap does NOT give
+                the "one gesture, one section" rule this needs: a trackpad
+                emits a long stream of deltas and native snap happily rides
+                it across multiple sections. See the deck controller below.
+
+     scroll-behavior is NOT smooth here: the JS animates scrollTop itself,
+     and a native smooth scroll on top of that produces two easings fighting
+     over the same property.
+     --------------------------------------------------------------------- */
+  html { scroll-behavior: auto; }
+  html.deck { scroll-snap-type: y mandatory; }
+  /* Snap is suspended while the JS animation runs — otherwise the snap
+     engine keeps yanking scrollTop back to the nearest point mid-tween and
+     the motion stutters. Re-enabled the moment the tween settles. */
+  html.deck.is-sliding { scroll-snap-type: none; }
+
+  body {
+    margin: 0;
+    background: var(--ink);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+
+  a { color: inherit; text-decoration: none; }
+  h1, h2, h3 { margin: 0; line-height: 1.08; letter-spacing: -.03em; font-weight: 700; }
+  p  { margin: 0; }
+
+  .wrap { width: 100%; max-width: var(--maxw); margin: 0 auto; padding: 0 28px; }
+
+  /* ---------------------------------------------------------------------
+     Nav — sticky, blurred. The border only appears once the page has
+     scrolled, so it doesn't cut across the hero at rest.
+     --------------------------------------------------------------------- */
+  .nav {
+    position: sticky; top: 0; z-index: 50;
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    background: rgba(8, 9, 11, .72);
+    border-bottom: 1px solid transparent;
+    transition: border-color .3s ease, background .3s ease;
+  }
+  .nav.is-scrolled { border-bottom-color: var(--line-soft); background: rgba(8, 9, 11, .9); }
+  .nav-in { display: flex; align-items: center; gap: 32px; height: 68px; }
+
+  .brand { display: inline-flex; align-items: center; gap: 11px; color: var(--text); }
+  .brand-svg { width: 30px; height: 30px; color: var(--lime); flex: none; }
+  .brand-svg circle, .brand-svg path { fill: none; stroke: currentColor; stroke-width: 3; }
+  .brand-svg .ticks circle, .brand-svg .pivot { fill: currentColor; stroke: none; }
+  .wordmark { font-size: 17px; font-weight: 800; letter-spacing: .1em; }
+
+  .nav-links { display: flex; gap: 4px; margin-left: auto; }
+  .nav-links a {
+    padding: 8px 14px; border-radius: 999px; font-size: 14.5px;
+    color: var(--text-2); transition: color .2s ease, background .2s ease;
+  }
+  .nav-links a:hover { color: var(--text); background: rgba(255, 255, 255, .05); }
+  .nav-links a.is-active { color: var(--lime-bright); background: rgba(184, 214, 51, .1); }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 11px 22px; border-radius: 999px; border: 1px solid transparent;
+    font-size: 14.5px; font-weight: 650; font-family: inherit;
+    cursor: pointer; white-space: nowrap;
+    transition: transform .18s ease, box-shadow .25s ease, background .2s ease, border-color .2s ease;
+  }
+  .btn-primary {
+    background: var(--lime); color: #10130A;
+    box-shadow: 0 0 0 0 rgba(184, 214, 51, 0);
+  }
+  .btn-primary:hover {
+    background: var(--lime-bright);
+    box-shadow: 0 6px 30px -6px var(--lime-glow);
+    transform: translateY(-1px);
+  }
+  .btn-ghost { border-color: var(--line); color: var(--text); }
+  .btn-ghost:hover { border-color: #39414B; background: rgba(255, 255, 255, .04); }
+  .btn-lg { padding: 14px 28px; font-size: 15.5px; }
+
+  .nav .btn { margin-left: 8px; }
+
+  /* ---------------------------------------------------------------------
+     Slide primitive — one section, one viewport.
+
+     `min-height`, not `height`: a fixed height would clip whatever doesn't
+     fit and hide it with no way to reach it. min-height lets a section that
+     genuinely can't fit grow instead, and the controller detects that case
+     and gives it internal scrolling (.is-tall below) rather than losing it.
+
+     svh, not vh: on mobile `100vh` is the LARGEST viewport (chrome
+     retracted), so every slide would overflow by the height of the address
+     bar until the user scrolled. svh is the smallest — the one that's
+     always actually visible.
+     --------------------------------------------------------------------- */
+  .slide {
+    min-height: 100vh;
+    min-height: 100svh;
+    scroll-snap-align: start;
+    scroll-snap-stop: always;   /* one slide per fling, not several */
+    display: flex; flex-direction: column; justify-content: center;
+    position: relative;
+  }
+
+  /* Safety valve. Applied by the controller only when a slide's content is
+     measurably taller than the viewport (very short windows, large text
+     zoom, long translations). The slide scrolls internally, and the wheel
+     handler advances to the next section only once that inner scroll has
+     reached its end — so content can never be silently cut off. */
+  .slide.is-tall {
+    /* An explicit HEIGHT, not just the inherited min-height. This is the
+       whole mechanism: with min-height alone the box simply grows to fit its
+       content, so there is no overflow and `overflow-y: auto` scrolls
+       nothing — the extra content just makes the document taller, where
+       mandatory snap then refuses to stop on it and it becomes unreachable.
+       Capping the height is what turns the slide into a real scroller. */
+    height: 100vh;
+    height: 100svh;
+    justify-content: flex-start;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    /* overscroll-behavior stays AUTO (the default) on purpose. `contain`
+       looks like the tidy choice here, but it blocks scroll chaining — and
+       since a tall slide fills the viewport, every touch lands inside it, so
+       once its inner scroll bottoms out no swipe could ever reach the next
+       slide. The page would simply trap you. Chaining is what lets a swipe
+       run the content out and then carry on into the snap. */
+  }
+
+  /* ---------------------------------------------------------------------
+     Hero. Text sits top-left over the centrepiece; on wide screens the
+     clock is centred behind/beside it, and below 900px it drops under the
+     copy so the headline never has to compete with it for width.
+     --------------------------------------------------------------------- */
+  /* The nav is added to the TOP padding only. The slide centres its content
+     inside the padding box, so pushing that box's top edge below the nav
+     makes the copy centre on the area the reader can actually see, instead
+     of on the full slide — where the nav's 68px silently steals from the top
+     and the block reads as sitting high. */
+  .hero { position: relative; padding: calc(56px + var(--nav-h)) 0 56px; overflow: hidden; }
+
+  /* The clock is now the hero's BACKGROUND, not a column beside the copy —
+     it fills the whole slide edge to edge and the text sits over it. */
+  .hero-grid {
+    position: relative; z-index: 3;
+    display: flex; align-items: center; min-height: 0;
+  }
+
+  .hero-copy { max-width: 620px; }
+
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 9px;
+    padding: 6px 14px 6px 10px; margin-bottom: 26px;
+    border: 1px solid var(--line); border-radius: 999px;
+    font-size: 12.5px; color: var(--text-2); letter-spacing: .01em;
+    background: rgba(255, 255, 255, .02);
+  }
+  .eyebrow .dot {
+    width: 6px; height: 6px; border-radius: 50%; background: var(--lime);
+    box-shadow: 0 0 10px 1px var(--lime-glow);
+  }
+
+  .hero h1 {
+    font-size: clamp(44px, 6.6vw, 84px);
+    font-weight: 700; letter-spacing: -.045em;
+  }
+  .hero h1 .accent {
+    background: linear-gradient(96deg, var(--lime-bright), var(--lime-deep));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  /* Both run lighter than their equivalents elsewhere on the page. The rest
+     of the site sets type on a flat panel; here it sits on a lit 3D object,
+     so --text-2 and --text-3 (tuned against solid --ink) lose too much
+     contrast wherever a bright part of the clock passes behind. */
+  .hero-sub {
+    margin-top: 22px; max-width: 460px;
+    font-size: 17.5px; color: #CBD0C6; line-height: 1.6;
+  }
+  .hero-cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 34px; }
+  .hero-note { margin-top: 18px; font-size: 13.5px; color: #9BA394; }
+
+  /* Stage: full-bleed background layer for the whole hero slide. The canvas
+     and the CSS fallback stack in the same box.
+
+     pointer-events:none matters — the stage covers the entire slide
+     including the CTA buttons, and without it the canvas would swallow
+     every click. The parallax listens on `window`, not the canvas, so
+     nothing is lost by making it click-through. */
+  .stage {
+    position: absolute; inset: 0; z-index: 0;
+    pointer-events: none;
+    /* Clips decorative children so they can't inflate the hero's measured
+       height. scrollHeight counts overflowing content even when an ancestor
+       has overflow:hidden, so the bloom below (previously inset:-10%) made
+       the hero measure 72px taller than the viewport and falsely trip the
+       .is-tall valve — producing a scrollbar over nothing but glow. */
+    overflow: hidden;
+  }
+  .stage canvas { display: block; width: 100%; height: 100%; }
+
+  /* Ambient bloom behind the object. Cheaper and steadier than a
+     postprocessing pass, and it can't blow out the lime the way an
+     unclamped bloom threshold does. Kept inside the box (inset:0) — it has
+     the whole hero to spread across now, so it never needed to overhang. */
+  .stage::before {
+    content: ''; position: absolute; inset: 0;
+    background: radial-gradient(circle at 50% 50%,
+      rgba(184, 214, 51, .14) 0%,
+      rgba(184, 214, 51, .05) 24%,
+      rgba(126, 154, 34, .025) 42%,
+      transparent 66%);
+    pointer-events: none; z-index: 0;
+  }
+  .stage > * { position: relative; z-index: 1; }
+
+  /* Scrim. The copy now sits ON the clock rather than beside it, so it needs
+     its own contrast floor — the dial is a mid-grey disc and white text over
+     bare metal is not reliably readable. Two layers: a left-weighted wash
+     that darkens the text column hardest and fades out over the dial, and
+     the existing vignette that keeps the outer edges black so the
+     centrepiece stays the brightest thing on screen. */
+  /* The scrim holds near-full strength across the ENTIRE copy column (which
+     ends around 45% of the width) and only then falls away. Measured: with
+     the falloff starting mid-canvas, the right-hand end of each line sat at
+     0.63 alpha, where the lime bezel passing behind dropped the sub-heading
+     to 2.98:1 and the note to 1.43:1 — unreadable. Holding to 40% and
+     falling off after puts the worst case above 4.5:1. */
+  .hero::before {
+    content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 1;
+    background: linear-gradient(100deg,
+      rgba(8, 9, 11, .96) 0%,
+      rgba(8, 9, 11, .93) 40%,
+      rgba(8, 9, 11, .62) 56%,
+      rgba(8, 9, 11, .22) 76%,
+      rgba(8, 9, 11, 0) 100%);
+  }
+  .hero::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 2;
+    background: radial-gradient(ellipse 78% 66% at 60% 50%, transparent 34%, var(--ink) 100%);
+  }
+
+  /* ---- CSS fallback clock (visible until/unless Three.js takes over) ---- */
+  .fallback-clock {
+    position: absolute; inset: 0; display: grid; place-items: center;
+  }
+  .fallback-clock.is-hidden { display: none; }
+  /* Square box inside the now full-bleed stage. Every ring below is sized in
+     PERCENTAGES, and a percentage width and height resolve against different
+     bases on a non-square parent — so without this the "circles" would
+     render as ellipses stretched to the hero's aspect. Sized off the smaller
+     viewport axis so it always fits. */
+  .fc-box {
+    position: relative; display: grid; place-items: center;
+    width: min(74svh, 74vw); aspect-ratio: 1 / 1;
+  }
+  .fc-rings { position: absolute; inset: 0; display: grid; place-items: center; }
+  .fc-ring {
+    position: absolute; border-radius: 50%;
+    border: 1px solid rgba(184, 214, 51, .14);
+  }
+  .fc-ring:nth-child(1) { width: 92%; height: 92%; border-color: rgba(184,214,51,.10); animation: fc-spin 46s linear infinite; }
+  .fc-ring:nth-child(2) { width: 76%; height: 76%; border-color: rgba(184,214,51,.16); animation: fc-spin 34s linear infinite reverse; }
+  .fc-ring:nth-child(3) { width: 61%; height: 61%; border-color: rgba(255,255,255,.07); animation: fc-spin 26s linear infinite; }
+  @keyframes fc-spin { to { transform: rotate(360deg); } }
+
+  .fc-face {
+    position: relative; width: 46%; aspect-ratio: 1; border-radius: 50%;
+    background: radial-gradient(circle at 38% 32%, #1B2027, #0B0D10 70%);
+    border: 1px solid rgba(184, 214, 51, .3);
+    box-shadow: 0 0 60px -14px var(--lime-glow), inset 0 0 40px rgba(0, 0, 0, .8);
+  }
+  /* Each tick is an invisible arm running from the top of the face to its
+     exact centre (top:0, height:50%), rotated about its own bottom edge —
+     which IS the face centre, for every tick, whatever the mark looks like.
+     The visible dash is drawn by ::before inside that arm.
+
+     The obvious alternative — position the dash itself and push the origin
+     out with a big percentage like `50% 629%` — silently breaks the moment
+     two ticks differ in height, because the percentage resolves against each
+     element's OWN height. The cardinal ticks are taller, so they landed on a
+     circle 36px further out than the rest (measured 110.5 vs 146.3 vs 176.5). */
+  .fc-tick {
+    position: absolute; left: 50%; top: 0; width: 2px; height: 50%;
+    transform-origin: 50% 100%;
+  }
+  .fc-tick::before {
+    content: ''; position: absolute; left: 50%; transform: translateX(-50%);
+    top: 12%; width: 2px; height: 14%;
+    background: rgba(255, 255, 255, .3);
+  }
+  .fc-tick.cardinal::before {
+    width: 2.5px; height: 18%;
+    background: var(--lime);
+  }
+  .fc-hand {
+    position: absolute; left: 50%; bottom: 50%;
+    transform-origin: 50% 100%; border-radius: 4px;
+  }
+  .fc-hour { width: 4px; height: 26%; margin-left: -2px; background: var(--text); }
+  .fc-min  { width: 3px; height: 37%; margin-left: -1.5px; background: var(--text); }
+  .fc-sec  { width: 1.5px; height: 42%; margin-left: -.75px; background: var(--lime); box-shadow: 0 0 8px var(--lime-glow); }
+  .fc-pivot {
+    position: absolute; left: 50%; top: 50%; width: 9px; height: 9px;
+    margin: -4.5px 0 0 -4.5px; border-radius: 50%;
+    background: var(--lime); box-shadow: 0 0 12px 2px var(--lime-glow);
+  }
+
+  /* ---------------------------------------------------------------------
+     Sections
+     --------------------------------------------------------------------- */
+  section { position: relative; }
+  /* Vertical padding is now breathing room INSIDE a viewport-tall slide, not
+     the thing that creates the section's height — so it's much smaller than
+     the 108px it was when sections stacked in normal flow. */
+  .band { padding: 56px 0; }
+  .band-alt { background: var(--ink-2); border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); }
+
+  .sec-head { max-width: 640px; margin-bottom: 54px; }
+  .sec-tag {
+    display: block; margin-bottom: 16px;
+    font-size: 12.5px; font-weight: 700; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--lime);
+  }
+  .sec-head h2 { font-size: clamp(30px, 3.6vw, 44px); }
+  .sec-head p { margin-top: 18px; font-size: 17px; color: var(--text-2); }
+
+  /* Features */
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .card {
+    padding: 30px 28px 32px; border-radius: var(--radius-lg);
+    background: linear-gradient(180deg, var(--panel), var(--ink-2));
+    border: 1px solid var(--line-soft);
+    transition: border-color .3s ease, transform .3s ease, background .3s ease;
+  }
+  .card:hover { border-color: #2C333C; transform: translateY(-3px); }
+  .card-ico {
+    width: 42px; height: 42px; margin-bottom: 22px;
+    display: grid; place-items: center; border-radius: 12px;
+    background: rgba(184, 214, 51, .1);
+    border: 1px solid rgba(184, 214, 51, .22);
+    color: var(--lime-bright);
+  }
+  .card-ico svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .card h3 { font-size: 17.5px; letter-spacing: -.015em; margin-bottom: 10px; }
+  .card p  { font-size: 14.8px; color: var(--text-2); line-height: 1.62; }
+
+  /* How it works */
+  .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; }
+  .step { position: relative; padding: 0 26px 0 0; }
+  .step-n {
+    display: inline-grid; place-items: center;
+    width: 40px; height: 40px; margin-bottom: 20px;
+    border-radius: 50%; border: 1px solid rgba(184, 214, 51, .3);
+    background: rgba(184, 214, 51, .08);
+    color: var(--lime-bright); font-family: var(--mono); font-size: 14px; font-weight: 700;
+  }
+  /* Connector between step markers; the last step has nothing to connect to. */
+  .step::before {
+    content: ''; position: absolute; left: 46px; top: 20px; right: 20px; height: 1px;
+    background: linear-gradient(90deg, rgba(184, 214, 51, .3), rgba(184, 214, 51, .04));
+  }
+  .step:last-child::before { display: none; }
+  .step h3 { font-size: 16.5px; margin-bottom: 9px; }
+  .step p  { font-size: 14.5px; color: var(--text-2); }
+
+  /* What this is — heading left, prose right */
+  .split { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); gap: 60px; align-items: start; }
+  .split h2 { font-size: clamp(30px, 4vw, 46px); }
+  .split-body p + p { margin-top: 18px; }
+  .split-body p { font-size: 17px; color: var(--text-2); line-height: 1.68; }
+  .split-body strong { color: var(--text); font-weight: 600; }
+
+  /* Testimonial slot — structurally present, deliberately unpopulated.
+     Nothing is invented here; it renders as an explicit empty state until
+     there are real quotes from real customers to put in it. */
+  .quote-slot {
+    margin-top: 56px; padding: 42px 32px; border-radius: var(--radius-lg);
+    border: 1px dashed var(--line); background: rgba(255, 255, 255, .012);
+    text-align: center; color: var(--text-3); font-size: 14.5px;
+  }
+  .quote-slot code { font-family: var(--mono); font-size: 13px; color: var(--text-2); }
+
+  /* ---------------------------------------------------------------------
+     Closing CTA — full-bleed.
+
+     The panel treatment (rounded card, border, its own background) now lives
+     on the SLIDE rather than on an inner box, so the whole viewport is the
+     call to action instead of a card floating in a black field. The inner
+     .cta-band keeps only the centring and the type.
+
+     Type scales up with it: a headline sized for a 620px-tall card looks
+     stranded when the same words own an entire screen, so the clamp ceiling
+     goes up and the vw term with it.
+     --------------------------------------------------------------------- */
+  .cta-slide {
+    text-align: center;
+    /* Nav-aware centring, same as .hero. Applied HERE and not on .slide
+       generally: this slide holds ~230px of content in a full viewport, so
+       it has the slack to give 68px away. The content-dense slides do not —
+       features measures 718px of a 720px viewport, and pushing it down by
+       the nav's height would tip it into internal scrolling to buy a
+       centring nicety. Not a trade worth making. */
+    padding-top: calc(56px + var(--nav-h));
+    background:
+      radial-gradient(ellipse 70% 58% at 50% 42%, rgba(184, 214, 51, .14), transparent 64%),
+      linear-gradient(180deg, var(--ink) 0%, var(--panel) 45%, var(--ink-2) 100%);
+    border-top: 1px solid var(--line-soft);
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .cta-band h2 { font-size: clamp(34px, 5.4vw, 70px); letter-spacing: -.04em; }
+  .cta-band p { margin: 24px auto 0; max-width: 520px; font-size: 18.5px; color: var(--text-2); }
+  .cta-band .btn { margin-top: 40px; }
+
+  /* Footer. As a slide it bottom-aligns rather than centring — a short
+     footer floating in the middle of an empty viewport reads as a layout
+     bug; sitting on the bottom edge reads as the end of the page. */
+  .slide.foot { justify-content: flex-end; }
+  .foot { border-top: 1px solid var(--line-soft); padding: 62px 0 40px; }
+  .foot-grid { display: grid; grid-template-columns: 1.6fr repeat(3, 1fr); gap: 40px; }
+  .foot-blurb { margin-top: 16px; max-width: 280px; font-size: 14px; color: var(--text-3); }
+  .foot h4 { margin: 0 0 16px; font-size: 12.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--text-2); font-weight: 700; }
+  .foot ul { margin: 0; padding: 0; list-style: none; }
+  .foot li { margin-bottom: 11px; }
+  .foot li a { font-size: 14.5px; color: var(--text-3); transition: color .2s ease; }
+  .foot li a:hover { color: var(--text); }
+  .foot-base {
+    margin-top: 52px; padding-top: 26px; border-top: 1px solid var(--line-soft);
+    display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+    font-size: 13.5px; color: var(--text-3);
+  }
+
+  /* ---------------------------------------------------------------------
+     Scroll reveal. Opt-in per element via .reveal; the observer adds .in.
+     Elements start visible if the observer never runs (JS off / error), so
+     a failure here can't leave the page blank.
+     --------------------------------------------------------------------- */
+  .reveal { opacity: 0; transform: translateY(18px); transition: opacity .7s cubic-bezier(.16,1,.3,1), transform .7s cubic-bezier(.16,1,.3,1); }
+  .reveal.in { opacity: 1; transform: none; }
+  .no-js .reveal { opacity: 1; transform: none; }
+
+  /* ---------------------------------------------------------------------
+     Short-viewport compression. Each slide now has exactly one viewport to
+     work with, so the densest one (six feature cards) is what decides
+     whether anything overflows. These steps shrink type and padding rather
+     than letting .is-tall kick in — internal scrolling inside a slide is a
+     correct fallback, but it's a worse experience than simply fitting.
+     Keyed on HEIGHT, since that's the constraint here, not width.
+     --------------------------------------------------------------------- */
+  /* 980, not 860: the six-card features slide is the tightest in the deck and
+     it was still overflowing by ~11px at a 900px-tall window. The breakpoint
+     has to sit above the tallest viewport that can't fit, not at a round
+     number. */
+  @media (max-height: 980px) {
+    .band { padding: 40px 0; }
+    /* Restated because `.band`'s padding SHORTHAND above resets padding-top,
+       and at equal specificity the later rule wins — so the nav offset set
+       on .cta-slide/.hero further up is silently discarded here. Any future
+       .band padding change has to keep these two in step. */
+    .cta-slide { padding-top: calc(40px + var(--nav-h)); }
+    .hero { padding: calc(28px + var(--nav-h)) 0 28px; }
+    .hero-grid { min-height: 0; }
+    /* The stage is a full-bleed background layer now, so it needs no size
+       capping of its own — the Three.js camera handles the framing. */
+    .eyebrow { margin-bottom: 16px; }
+    .hero-sub { margin-top: 16px; font-size: 16px; }
+    .hero-cta { margin-top: 24px; }
+    .sec-head { margin-bottom: 34px; }
+    .sec-head h2 { font-size: clamp(26px, 3vw, 34px); }
+    .sec-head p { margin-top: 12px; font-size: 15.5px; }
+    .cards { gap: 14px; }
+    .card { padding: 22px 22px 24px; border-radius: 18px; }
+    .card-ico { width: 36px; height: 36px; margin-bottom: 15px; border-radius: 10px; }
+    .card-ico svg { width: 18px; height: 18px; }
+    .card h3 { font-size: 16px; margin-bottom: 7px; }
+    .card p { font-size: 13.8px; line-height: 1.55; }
+    /* No padding to trim any more — the CTA is the slide itself, and the
+       slide already carries the band padding. Only the type needs reining
+       in on a short screen. */
+    .cta-band p { margin-top: 18px; font-size: 17px; }
+    .cta-band .btn { margin-top: 30px; }
+  }
+  @media (max-height: 720px) {
+    .sec-head { margin-bottom: 24px; }
+    .sec-tag { margin-bottom: 10px; }
+    .card { padding: 18px 18px 20px; }
+    .card-ico { width: 32px; height: 32px; margin-bottom: 11px; }
+    .card h3 { font-size: 15.2px; }
+    .card p { font-size: 13.2px; }
+    .foot { padding: 40px 0 28px; }
+    .foot-base { margin-top: 32px; padding-top: 20px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .reveal { opacity: 1; transform: none; transition: none; }
+    .fc-ring { animation: none; }
+  }
+
+  /* ---------------------------------------------------------------------
+     Responsive
+     --------------------------------------------------------------------- */
+  @media (max-width: 1000px) {
+    .cards { grid-template-columns: repeat(2, 1fr); }
+    .steps { grid-template-columns: repeat(2, 1fr); row-gap: 40px; }
+    .step:nth-child(2)::before { display: none; }
+    .split { grid-template-columns: 1fr; gap: 28px; }
+  }
+  @media (max-width: 900px) {
+    .hero { padding-top: calc(40px + var(--nav-h)); }
+    .hero-copy { max-width: none; }
+    /* Narrow screens put the copy directly over the middle of the dial
+       rather than off to one side, so the scrim goes from left-weighted to
+       an even wash — a horizontal gradient would leave the right-hand words
+       sitting on bare metal. Heavier overall, for the same reason. */
+    /* Heavier than the desktop scrim, and deliberately so. Stacked, the copy
+       covers most of the viewport, so there is no "empty" side for the clock
+       to occupy — text and artwork share the same pixels everywhere. At the
+       .74 this started at, the note measured 3.63:1 against a hand passing
+       behind it. The clock reads as a glow behind the words on a phone
+       rather than a legible dial; that is the right trade at this size. */
+    .hero::before {
+      background: linear-gradient(180deg,
+        rgba(8, 9, 11, .91) 0%,
+        rgba(8, 9, 11, .87) 42%,
+        rgba(8, 9, 11, .91) 100%);
+    }
+    .hero::after { background: radial-gradient(ellipse 96% 62% at 50% 50%, transparent 30%, var(--ink) 100%); }
+  }
+  @media (max-width: 760px) {
+    .nav-links { display: none; }
+    .band { padding: 74px 0; }
+    .cards, .steps { grid-template-columns: 1fr; }
+    .step::before { display: none; }
+    .step { padding-right: 0; }
+    .foot-grid { grid-template-columns: 1fr 1fr; gap: 32px; }
+  }
+</style>
+</head>
+
+<body class="no-js">
+
+<!-- =====================================================================
+     Nav
+     ===================================================================== -->
+<header class="nav" id="nav">
+  <div class="wrap nav-in">
+    <a class="brand" href="#top" aria-label="Time Ops — home">
+      <!-- Same emblem as the app sidebar: inline so it inherits currentColor
+           and needs no extra request. Placeholder wordmark. -->
+      <svg class="brand-svg" viewBox="0 0 64 64" aria-hidden="true">
+        <circle cx="32" cy="32" r="29" />
+        <circle cx="32" cy="32" r="22" />
+        <g class="ticks">
+          <circle cx="32" cy="6.5" r="1.5" /><circle cx="45" cy="10" r="1.5" />
+          <circle cx="54" cy="19" r="1.5" /><circle cx="57.5" cy="32" r="1.5" />
+          <circle cx="54" cy="45" r="1.5" /><circle cx="45" cy="54" r="1.5" />
+          <circle cx="32" cy="57.5" r="1.5" /><circle cx="19" cy="54" r="1.5" />
+          <circle cx="10" cy="45" r="1.5" /><circle cx="6.5" cy="32" r="1.5" />
+          <circle cx="10" cy="19" r="1.5" /><circle cx="19" cy="10" r="1.5" />
+        </g>
+        <path d="M32 32 L18 20" /><path d="M32 32 L46 20" /><path d="M32 32 L32 46" />
+        <circle class="pivot" cx="32" cy="32" r="3" />
+      </svg>
+      <span class="wordmark">TIME OPS</span>
+    </a>
+
+    <nav class="nav-links" id="navLinks">
+      <a href="#features">Features</a>
+      <a href="#how">How it works</a>
+      <a href="#what">What this is</a>
+      <a href="login.html">Log in</a>
+    </nav>
+
+    <a class="btn btn-primary" href="#request">Request access</a>
+  </div>
+</header>
+
+<!-- =====================================================================
+     Hero
+     ===================================================================== -->
+<section class="slide hero" id="top">
+
+  <!-- Centrepiece, full-bleed behind everything. A direct child of the
+       section, NOT of .wrap — inset:0 resolves against the nearest
+       positioned ancestor, and inside .wrap that would cap it at the 1180px
+       content column instead of filling the slide.
+
+       The CSS clock inside is the real fallback, not a placeholder: if the
+       Three.js module fails to load it stays on screen and keeps time. -->
+  <div class="stage" id="stage">
+    <div class="fallback-clock" id="fallbackClock" aria-hidden="true">
+      <div class="fc-box">
+        <div class="fc-rings">
+          <div class="fc-ring"></div><div class="fc-ring"></div><div class="fc-ring"></div>
+        </div>
+        <div class="fc-face" id="fcFace">
+          <div class="fc-hand fc-hour" id="fcHour"></div>
+          <div class="fc-hand fc-min"  id="fcMin"></div>
+          <div class="fc-hand fc-sec"  id="fcSec"></div>
+          <div class="fc-pivot"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap hero-grid">
+
+    <div class="hero-copy">
+      <span class="eyebrow"><span class="dot"></span> Timesheets, approvals and reporting in one place</span>
+
+      <h1>Every hour,<br><span class="accent">accounted for</span></h1>
+
+      <p class="hero-sub">
+        Weekly timesheets, role-aware approvals and dashboards that reconcile —
+        for teams where the numbers have to hold up to scrutiny.
+      </p>
+
+      <div class="hero-cta">
+        <a class="btn btn-primary btn-lg" href="#request">Request access</a>
+        <a class="btn btn-ghost btn-lg" href="#how">See how it works</a>
+      </div>
+
+      <p class="hero-note">Accounts are provisioned by your administrator.</p>
+    </div>
+
+  </div>
+</section>
+
+<!-- =====================================================================
+     Features
+     ===================================================================== -->
+<section class="slide band band-alt" id="features">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="sec-tag">Features</span>
+      <h2>Built around how the work actually gets recorded</h2>
+      <p>Not a generic tracker bolted onto a spreadsheet — every part of the flow, from the weekly grid to the audit trail, assumes hours get reviewed by someone.</p>
+    </div>
+
+    <div class="cards">
+      <div class="card reveal">
+        <div class="card-ico"><svg viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4M8 14h3M8 17.5h6"/></svg></div>
+        <h3>Weekly timesheets that hold</h3>
+        <p>Pick a week, fill the grid per project and task, save as a draft. Copy last week forward when the work repeats. Daily and weekly caps are enforced on the server, not just in the form.</p>
+      </div>
+
+      <div class="card reveal">
+        <div class="card-ico"><svg viewBox="0 0 24 24"><path d="M20 6.5L9.5 17 4 11.5"/></svg></div>
+        <h3>Approvals without the back-and-forth</h3>
+        <p>Leads approve or request changes inline, project by project — so one disputed line doesn't hold up an otherwise clean week.</p>
+      </div>
+
+      <div class="card reveal">
+        <div class="card-ico"><svg viewBox="0 0 24 24"><path d="M12 20.5v-8M4 4.5h16M7 4.5v4a5 5 0 0010 0v-4M8.5 20.5h7"/></svg></div>
+        <h3>Edit requests, not silent edits</h3>
+        <p>Once a week is submitted it locks. Changing a submitted entry means raising a request that a reviewer sees and signs off — the correction is part of the record.</p>
+      </div>
+
+      <div class="card reveal">
+        <div class="card-ico"><svg viewBox="0 0 24 24"><path d="M4 20.5V13M10 20.5V6M16 20.5v-5M22 20.5V9"/></svg></div>
+        <h3>Dashboards that answer real questions</h3>
+        <p>Hours by project, by task and by member, filtered to any range. Estimates sit next to actuals, and deep search finds a single task's hours across the whole history.</p>
+      </div>
+
+      <div class="card reveal">
+        <div class="card-ico"><svg viewBox="0 0 24 24"><path d="M12 2.5l8 3.5v5.5c0 4.6-3.2 8.4-8 10-4.8-1.6-8-5.4-8-10V6z"/><path d="M9.5 12l1.8 1.8 3.4-3.6"/></svg></div>
+        <h3>Five roles, enforced server-side</h3>
+        <p>Admin, CEO, PM, Team Lead and Team Member each see a different slice. Scoping is applied at the API — hiding a button was never the security model.</p>
+      </div>
+
+      <div class="card reveal">
+        <div class="card-ico"><svg viewBox="0 0 24 24"><path d="M12 7.5v5l3 2"/><circle cx="12" cy="12" r="8.5"/></svg></div>
+        <h3>An append-only audit trail</h3>
+        <p>Every state change is written with its before and after values, attributed to whoever made it. Log rows are only ever inserted — never updated, never deleted.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =====================================================================
+     How it works
+     ===================================================================== -->
+<section class="slide band" id="how">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="sec-tag">How it works</span>
+      <h2>Four steps, start to signed off</h2>
+    </div>
+
+    <div class="steps">
+      <div class="step reveal">
+        <div class="step-n">1</div>
+        <h3>Log your hours</h3>
+        <p>Fill the week's grid against the projects and tasks you're assigned to. Drafts save as you go.</p>
+      </div>
+      <div class="step reveal">
+        <div class="step-n">2</div>
+        <h3>Submit for review</h3>
+        <p>Submitting locks the week, so the numbers under review can't shift while someone's reading them.</p>
+      </div>
+      <div class="step reveal">
+        <div class="step-n">3</div>
+        <h3>Your lead responds</h3>
+        <p>Approved, or sent back with a note saying what to fix. Either way it lands in your inbox.</p>
+      </div>
+      <div class="step reveal">
+        <div class="step-n">4</div>
+        <h3>It rolls into reporting</h3>
+        <p>Approved hours flow straight into the dashboards. Every figure you see there has been signed off.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =====================================================================
+     What this is
+     ===================================================================== -->
+<section class="slide band band-alt" id="what">
+  <div class="wrap">
+    <div class="split">
+      <h2 class="reveal">What this<br>actually is</h2>
+      <div class="split-body reveal">
+        <p>
+          Time Ops is an internal tool for teams who run client projects and need
+          the hours to be <strong>defensible</strong> — not just collected. It's built for
+          organisations where the person logging time, the person reviewing it and
+          the person reporting on it are three different people with three different
+          levels of access.
+        </p>
+        <p>
+          The problem it solves is the gap between the spreadsheet everyone
+          actually fills in and the number that ends up in a report. In between
+          sit the corrections, the approvals and the "who changed this?" —
+          the parts a spreadsheet quietly loses. Here they're first-class:
+          submission locks the week, corrections go through a reviewer, and
+          every change keeps its before-and-after.
+        </p>
+        <p>
+          It is not a billing system and it does not price your work. It tracks
+          hours, who approved them, and what they were spent on.
+        </p>
+
+        <!-- Real quotes go here when there are real customers to quote.
+             Nothing invented in the meantime. -->
+        <div class="quote-slot">
+          <code>&lt;!-- testimonials --&gt;</code><br>
+          Reserved for customer quotes — intentionally empty until there are real ones.
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =====================================================================
+     Closing CTA
+     ===================================================================== -->
+<section class="slide band cta-slide" id="request">
+  <div class="wrap">
+    <div class="cta-band reveal">
+      <h2>Ready to see it on your own data?</h2>
+      <p>Access is provisioned per organisation. Get in touch and we'll set your team up.</p>
+      <a class="btn btn-primary btn-lg" href="#request">Request access</a>
+    </div>
+  </div>
+</section>
+
+<!-- =====================================================================
+     Footer
+     ===================================================================== -->
+<footer class="slide foot" id="end">
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <a class="brand" href="#top">
+          <svg class="brand-svg" viewBox="0 0 64 64" aria-hidden="true">
+            <circle cx="32" cy="32" r="29" /><circle cx="32" cy="32" r="22" />
+            <g class="ticks">
+              <circle cx="32" cy="6.5" r="1.5" /><circle cx="45" cy="10" r="1.5" />
+              <circle cx="54" cy="19" r="1.5" /><circle cx="57.5" cy="32" r="1.5" />
+              <circle cx="54" cy="45" r="1.5" /><circle cx="45" cy="54" r="1.5" />
+              <circle cx="32" cy="57.5" r="1.5" /><circle cx="19" cy="54" r="1.5" />
+              <circle cx="10" cy="45" r="1.5" /><circle cx="6.5" cy="32" r="1.5" />
+              <circle cx="10" cy="19" r="1.5" /><circle cx="19" cy="10" r="1.5" />
+            </g>
+            <path d="M32 32 L18 20" /><path d="M32 32 L46 20" /><path d="M32 32 L32 46" />
+            <circle class="pivot" cx="32" cy="32" r="3" />
+          </svg>
+          <span class="wordmark">TIME OPS</span>
+        </a>
+        <p class="foot-blurb">Weekly timesheets, role-aware approvals and reporting that reconciles.</p>
+      </div>
+
+      <!-- Placeholder link columns — non-functional until these pages exist. -->
+      <div>
+        <h4>Product</h4>
+        <ul>
+          <li><a href="#features">Features</a></li>
+          <li><a href="#how">How it works</a></li>
+          <li><a href="#what">What this is</a></li>
+          <li><a href="login.html">Log in</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <ul>
+          <li><a href="#request">About</a></li>
+          <li><a href="#request">Contact</a></li>
+          <li><a href="#request">Careers</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Legal</h4>
+        <ul>
+          <li><a href="#request">Privacy</a></li>
+          <li><a href="#request">Terms</a></li>
+          <li><a href="#request">Security</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="foot-base">
+      <span>&copy; <span id="year">2026</span> Time Ops. All rights reserved.</span>
+      <span>Wordmark is a placeholder.</span>
+    </div>
+  </div>
+</footer>
+
+
+<!-- =====================================================================
+     Page behaviour (no dependencies)
+     ===================================================================== -->
+<script>
+  document.body.classList.remove('no-js');
+  document.getElementById('year').textContent = new Date().getFullYear();
+
+  var reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---- nav ------------------------------------------------------------
+     The nav's scrolled state and active link are driven by the deck
+     controller's syncNav() rather than by scroll position: under snap
+     scrolling the page is always parked exactly on a slide, so "which slide
+     am I on" is a cleaner and more reliable signal than a pixel threshold,
+     and it can't disagree with the deck about where we are.
+     --------------------------------------------------------------------- */
+  var navEl = document.getElementById('nav');
+  var linkEls = [].slice.call(document.querySelectorAll('#navLinks a[href^="#"]'));
+
+  /* ---- scroll reveal --------------------------------------------------- */
+  var revealEls = [].slice.call(document.querySelectorAll('.reveal'));
+
+  function revealNow(el) { el.classList.add('in'); }
+
+  /* Reveals anything currently on screen. Used as the safety net below AND
+     called after every slide transition, so a slide's contents are revealed
+     when you ARRIVE at it. A blanket "reveal everything after N seconds"
+     would defeat the effect entirely under snap scrolling — by the time you
+     reached slide five, it would already have played to an empty room. */
+  function revealVisible() {
+    revealEls.forEach(function (el) {
+      if (el.classList.contains('in')) return;
+      var r = el.getBoundingClientRect();
+      if (r.top < innerHeight * 0.92 && r.bottom > 0) revealNow(el);
+    });
+  }
+
+  if (!('IntersectionObserver' in window) || reduceMotion) {
+    revealEls.forEach(revealNow);
+  } else {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (!e.isIntersecting) return;
+        // Small stagger so a grid of cards arrives in sequence, not as a slab.
+        var delay = (Array.prototype.indexOf.call(e.target.parentNode.children, e.target) % 6) * 70;
+        setTimeout(function () { revealNow(e.target); }, delay);
+        io.unobserve(e.target);
+      });
+    }, { rootMargin: '0px 0px -8% 0px', threshold: 0.05 });
+    revealEls.forEach(function (el) { io.observe(el); });
+
+    /* Safety net, now scoped to what's actually on screen. Every .reveal
+       starts at opacity:0 and is only ever shown by the observer, so if
+       those callbacks never fire (a backgrounded or non-compositing tab can
+       suppress them) the page reads as blank — far worse than losing the
+       animation. Scoping to the viewport keeps later slides' reveals intact
+       for when the reader gets there. */
+    setTimeout(revealVisible, 2500);
+  }
+
+  /* =====================================================================
+     Deck controller — section-at-a-time scrolling.
+
+     Division of labour, and the reasoning behind it:
+
+       TOUCH is left entirely to native CSS scroll-snap. Intercepting
+       touchmove to drive scrolling by hand means reimplementing momentum,
+       rubber-banding and gesture cancellation, and the result always lags
+       the finger by a frame or two. `scroll-snap-stop: always` already
+       gives the one-slide-per-swipe rule natively, including for a hard
+       fling, so there is nothing left for JS to add here — only things for
+       it to break.
+
+       WHEEL is intercepted, because native snap genuinely cannot do what's
+       needed: a trackpad emits a long stream of small deltas from a single
+       physical gesture, and native snap rides that stream across several
+       sections. The lock below collapses a whole gesture into one move.
+
+       KEYS are handled for Up/Down, PageUp/PageDown, Home/End.
+     ===================================================================== */
+  (function () {
+    var slides = [].slice.call(document.querySelectorAll('.slide'));
+    if (slides.length < 2) return;
+
+    var root = document.documentElement;
+    root.classList.add('deck');
+
+    var DURATION = 520;      // full-section move; longer than the app's small
+                             // UI transitions because far more travels
+    var GESTURE_GAP = 90;    // quiet time that ends one wheel gesture
+
+    var index = 0;
+    var sliding = false;
+    var lastWheel = 0;
+    var rafId = 0;
+    // Outer scope, not per-call: a settle timer left over from an
+    // interrupted transition must be cancellable by the NEXT one, or it
+    // fires later and yanks the scroll back to the superseded target.
+    var settleT = 0;
+
+    function targetTop(i) {
+      // offsetTop, not getBoundingClientRect — the latter is relative to the
+      // current scroll, which is exactly what's being animated.
+      return slides[i].offsetTop;
+    }
+
+    function currentIndex() {
+      var y = scrollY, best = 0, bestD = Infinity;
+      slides.forEach(function (s, i) {
+        var d = Math.abs(s.offsetTop - y);
+        if (d < bestD) { bestD = d; best = i; }
+      });
+      return best;
+    }
+
+    // easeInOutCubic: symmetric, no overshoot. An elastic/back easing reads
+    // as playful, which is wrong for a full-screen move — it makes the whole
+    // page feel like it wobbled.
+    function ease(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
+
+    function goTo(i, immediate) {
+      i = Math.max(0, Math.min(slides.length - 1, i));
+      var from = scrollY;
+      var to = targetTop(i);
+      index = i;
+      syncNav(i);
+
+      if (immediate || reduceMotion || Math.abs(to - from) < 2) {
+        cancelAnimationFrame(rafId);
+        sliding = false;
+        root.classList.remove('is-sliding');
+        scrollTo(0, to);
+        afterArrive();
+        return;
+      }
+
+      sliding = true;
+      root.classList.add('is-sliding');   // suspend native snap for the tween
+      cancelAnimationFrame(rafId);
+      clearTimeout(settleT);
+
+      // Land exactly on the target, then hand control back to the snap
+      // engine — so re-enabling it can't produce a visible correction jump.
+      function settle() {
+        cancelAnimationFrame(rafId);
+        clearTimeout(settleT);
+        scrollTo(0, to);
+        sliding = false;
+        root.classList.remove('is-sliding');
+        afterArrive();
+      }
+
+      /* Guaranteed settle. The tween is driven by rAF, which is PAUSED
+         outright in a backgrounded or non-compositing tab — and if it never
+         fires, `sliding` stays true and every subsequent scroll, key and
+         click is ignored: the page locks up for good. setTimeout is
+         throttled in that state but still fires, so it can always end the
+         transition. Normal path clears this before it ever runs. */
+      settleT = setTimeout(settle, DURATION + 400);
+
+      var start = performance.now();
+      (function step(now) {
+        var t = Math.min(1, (now - start) / DURATION);
+        scrollTo(0, from + (to - from) * ease(t));
+        if (t < 1) { rafId = requestAnimationFrame(step); return; }
+        settle();
+      })(start);
+    }
+
+    function afterArrive() {
+      // Reveal the slide we just landed on. Under snap scrolling the
+      // observer's own trigger and the arrival are effectively simultaneous,
+      // and this guarantees the content is shown even if it didn't fire.
+      revealVisible();
+      // Re-measure on arrival too, not only on resize. A stale flag in the
+      // safe direction just adds a pointless scrollbar, but a stale MISSING
+      // flag hides content — and `resize` is not the only thing that changes
+      // a slide's height (font swap, late images, mobile URL-bar collapse,
+      // text zoom). Landing on a slide is the moment its measurement
+      // actually has to be right.
+      measureTall();
+    }
+
+    /* Tall slides: a slide whose content exceeds the viewport scrolls
+       internally FIRST, and only advances once that inner scroll has hit its
+       end. Without this the overflow is simply unreachable. Re-measured on
+       resize because the threshold is viewport-relative. */
+    function measureTall() {
+      slides.forEach(function (s) {
+        // Compare against the un-flagged natural height: remove the class
+        // before measuring or a slide that's already scrolling internally
+        // reports its clipped height and never un-flags.
+        s.classList.remove('is-tall');
+        if (s.scrollHeight > innerHeight + 4) s.classList.add('is-tall');
+      });
+    }
+
+    function tallScroller(node) {
+      // The .is-tall slide containing the event target, if any.
+      while (node && node !== document.body) {
+        if (node.classList && node.classList.contains('is-tall')) return node;
+        node = node.parentNode;
+      }
+      return null;
+    }
+
+    // ---- wheel ----------------------------------------------------------
+    addEventListener('wheel', function (e) {
+      if (e.ctrlKey) return;                       // pinch-zoom, leave alone
+      var dir = e.deltaY > 0 ? 1 : -1;
+
+      // Inside a tall slide, scroll its content until it bottoms/tops out.
+      var tall = tallScroller(e.target);
+      if (tall) {
+        var atEnd = dir > 0
+          ? tall.scrollTop + tall.clientHeight >= tall.scrollHeight - 2
+          : tall.scrollTop <= 2;
+        if (!atEnd) return;                        // let the slide scroll natively
+      }
+
+      e.preventDefault();
+
+      var now = performance.now();
+      // One physical gesture = one move. A trackpad flick is ~40 events over
+      // ~300ms; treating each as a step would fly through the whole deck.
+      // Any event less than GESTURE_GAP after the last is the SAME gesture.
+      var sameGesture = now - lastWheel < GESTURE_GAP;
+      lastWheel = now;
+      if (sliding || sameGesture) return;
+
+      // Small deltas are usually inertia tail rather than intent.
+      if (Math.abs(e.deltaY) < 4) return;
+
+      goTo(currentIndex() + dir);
+    }, { passive: false });
+
+    // ---- keyboard -------------------------------------------------------
+    addEventListener('keydown', function (e) {
+      var tag = (e.target.tagName || '').toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || e.target.isContentEditable) return;
+
+      var map = {
+        ArrowDown: 1, PageDown: 1, ' ': 1, Spacebar: 1,
+        ArrowUp: -1, PageUp: -1,
+      };
+      if (e.key === 'Home')      { e.preventDefault(); goTo(0); return; }
+      if (e.key === 'End')       { e.preventDefault(); goTo(slides.length - 1); return; }
+      if (!(e.key in map)) return;
+
+      // Same tall-slide courtesy as the wheel: let the arrow keys walk the
+      // overflow before they move the deck.
+      var tall = tallScroller(document.activeElement) || tallScroller(e.target);
+      if (tall) {
+        var d = map[e.key];
+        var atEnd = d > 0
+          ? tall.scrollTop + tall.clientHeight >= tall.scrollHeight - 2
+          : tall.scrollTop <= 2;
+        if (!atEnd) return;
+      }
+
+      e.preventDefault();
+      if (sliding) return;
+      goTo(currentIndex() + map[e.key]);
+    });
+
+    // ---- anchors --------------------------------------------------------
+    // Nav and footer links jump straight to a slide rather than walking
+    // there one section at a time.
+    [].slice.call(document.querySelectorAll('a[href^="#"]')).forEach(function (a) {
+      a.addEventListener('click', function (e) {
+        var id = a.getAttribute('href').slice(1);
+        if (!id) return;
+        var el = document.getElementById(id);
+        if (!el) return;
+        var i = slides.indexOf(el.closest ? el.closest('.slide') : null);
+        if (i < 0) return;
+        e.preventDefault();
+        goTo(i);
+      });
+    });
+
+    // ---- nav state ------------------------------------------------------
+    function syncNav(i) {
+      navEl.classList.toggle('is-scrolled', i > 0);
+      var id = slides[i] ? slides[i].id : '';
+      linkEls.forEach(function (a) {
+        a.classList.toggle('is-active', a.getAttribute('href') === '#' + id);
+      });
+    }
+
+    // ---- resize ---------------------------------------------------------
+    // Slide offsets are viewport-derived, so a resize invalidates both the
+    // tall-slide flags and the current scroll position. Debounced because
+    // mobile browsers fire resize continuously while the URL bar slides.
+    var resizeT;
+    addEventListener('resize', function () {
+      clearTimeout(resizeT);
+      resizeT = setTimeout(function () {
+        measureTall();
+        goTo(index, true);   // re-align without animating
+      }, 150);
+    });
+
+    // ---- init -----------------------------------------------------------
+    measureTall();
+    index = currentIndex();
+    syncNav(index);
+
+    // Late layout shifts change slide heights after this first measurement:
+    // a webfont swapping in re-flows every heading, and images settling
+    // changes card heights. Both land after DOMContentLoaded, so re-measure
+    // when they do rather than trusting the initial pass.
+    addEventListener('load', measureTall);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(measureTall);
+
+    // Deep link (/landing.html#features) should open on that slide.
+    if (location.hash) {
+      var target = document.getElementById(location.hash.slice(1));
+      var ti = target ? slides.indexOf(target.closest('.slide')) : -1;
+      if (ti > -1) goTo(ti, true);
+    }
+
+    // Native snap (touch) moves scrollY without going through goTo, so the
+    // nav state has to track real scrolling too.
+    addEventListener('scroll', function () {
+      if (sliding) return;
+      var i = currentIndex();
+      if (i !== index) { index = i; syncNav(i); }
+      revealVisible();
+    }, { passive: true });
+  })();
+
+  /* ---- CSS fallback clock ---------------------------------------------
+     Runs regardless; if Three.js loads it hides this element, but until
+     then (and forever, if the CDN is unreachable) this is the hero.
+     --------------------------------------------------------------------- */
+  (function () {
+    var face = document.getElementById('fcFace');
+    if (!face) return;
+
+    // 12 tick marks, laid out once.
+    for (var i = 0; i < 12; i++) {
+      var t = document.createElement('div');
+      t.className = 'fc-tick' + (i % 3 === 0 ? ' cardinal' : '');
+      t.style.transform = 'translateX(-50%) rotate(' + (i * 30) + 'deg)';
+      face.appendChild(t);
+    }
+
+    var h = document.getElementById('fcHour'),
+        m = document.getElementById('fcMin'),
+        s = document.getElementById('fcSec');
+
+    function tick() {
+      var d = new Date();
+      var sec = d.getSeconds() + d.getMilliseconds() / 1000;
+      var min = d.getMinutes() + sec / 60;
+      var hr  = (d.getHours() % 12) + min / 60;
+      h.style.transform = 'rotate(' + (hr * 30) + 'deg)';
+      m.style.transform = 'rotate(' + (min * 6) + 'deg)';
+      s.style.transform = 'rotate(' + (sec * 6) + 'deg)';
+      requestAnimationFrame(tick);
+    }
+    tick();
+  })();
+</script>
+
+<!-- Three.js centrepiece. Module + import map: if the CDN can't be reached
+     this script never executes and the CSS clock above simply remains. -->
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+const stage = document.getElementById('stage');
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// ---- palette (kept in sync with the CSS tokens above) ----------------------
+const LIME        = 0xB8D633;
+const LIME_BRIGHT = 0xD6F170;
+const STEEL       = 0x2A3038;
+const DARK        = 0x0E1013;
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));   // capped: past 2x the
+                                                         // cost is real and the
+                                                         // gain isn't visible
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+stage.appendChild(renderer.domElement);
+
+const scene  = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
+camera.position.set(0, 0, 8.2);
+
+// `rig` carries the parallax so the clock's own animation stays independent
+// of where the pointer is — rotating the clock group directly would fight
+// the hands' transforms.
+const rig = new THREE.Group();
+scene.add(rig);
+
+// ---- lighting --------------------------------------------------------------
+// Key from upper-left picks out the metal; the lime point light sits BEHIND
+// the dial to rim the rings, which is what sells the glow without tinting
+// the whole object green.
+scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+
+const key = new THREE.DirectionalLight(0xffffff, 2.4);
+key.position.set(-4, 5, 6);
+scene.add(key);
+
+const rim = new THREE.PointLight(LIME, 55, 22, 2);
+rim.position.set(0, 0.4, -3.2);
+scene.add(rim);
+
+const fill = new THREE.PointLight(0x8FA8C8, 14, 26, 2);
+fill.position.set(5, -3, 4);
+scene.add(fill);
+
+// ---- concentric rings ------------------------------------------------------
+// Echo the reference's layered composition. Each gets its own tilt and speed
+// so they never line up into a single flat annulus.
+const ringSpecs = [
+  { r: 2.35, tube: 0.055, color: STEEL, emissive: 0x000000, ei: 0,    speed:  0.055, tilt: [ 0.42, -0.30] },
+  { r: 2.85, tube: 0.038, color: 0x1B2028, emissive: LIME,  ei: 0.16, speed: -0.038, tilt: [-0.55,  0.24] },
+  { r: 3.35, tube: 0.026, color: 0x161A20, emissive: 0x000000, ei: 0, speed:  0.026, tilt: [ 0.22,  0.62] },
+  { r: 3.9,  tube: 0.016, color: 0x141920, emissive: LIME,  ei: 0.10, speed: -0.018, tilt: [-0.34, -0.48] },
+];
+
+const rings = ringSpecs.map((s) => {
+  const mesh = new THREE.Mesh(
+    new THREE.TorusGeometry(s.r, s.tube, 20, 160),
+    new THREE.MeshStandardMaterial({
+      color: s.color, metalness: 0.95, roughness: 0.22,
+      emissive: s.emissive, emissiveIntensity: s.ei,
+    }),
+  );
+  mesh.rotation.x = s.tilt[0];
+  mesh.rotation.y = s.tilt[1];
+  mesh.userData.speed = s.speed;
+  rig.add(mesh);
+  return mesh;
+});
+
+// ---- clock -----------------------------------------------------------------
+const clock = new THREE.Group();
+rig.add(clock);
+
+// Dial: a shallow cylinder rather than a plane, so the bezel has something
+// with actual depth to sit on and the edge catches the key light.
+const dial = new THREE.Mesh(
+  new THREE.CylinderGeometry(1.55, 1.55, 0.14, 96),
+  new THREE.MeshStandardMaterial({ color: DARK, metalness: 0.55, roughness: 0.5 }),
+);
+dial.rotation.x = Math.PI / 2;
+clock.add(dial);
+
+const bezel = new THREE.Mesh(
+  new THREE.TorusGeometry(1.6, 0.045, 20, 140),
+  new THREE.MeshStandardMaterial({
+    color: 0x1E242C, metalness: 0.95, roughness: 0.18,
+    emissive: LIME, emissiveIntensity: 0.32,
+  }),
+);
+clock.add(bezel);
+
+const innerRing = new THREE.Mesh(
+  new THREE.TorusGeometry(1.28, 0.008, 12, 120),
+  new THREE.MeshStandardMaterial({ color: 0x39424D, metalness: 0.9, roughness: 0.3 }),
+);
+innerRing.position.z = 0.08;
+clock.add(innerRing);
+
+// Hour ticks: every third one (12/3/6/9) is longer and lime.
+const tickMinor = new THREE.MeshStandardMaterial({ color: 0xBFC6BC, metalness: 0.5, roughness: 0.45 });
+const tickMajor = new THREE.MeshStandardMaterial({
+  color: LIME, metalness: 0.4, roughness: 0.35, emissive: LIME, emissiveIntensity: 0.55,
+});
+for (let i = 0; i < 12; i++) {
+  const major = i % 3 === 0;
+  const t = new THREE.Mesh(
+    new THREE.BoxGeometry(major ? 0.05 : 0.028, major ? 0.2 : 0.12, 0.03),
+    major ? tickMajor : tickMinor,
+  );
+  const a = (i / 12) * Math.PI * 2;
+  const r = 1.36;
+  t.position.set(Math.sin(a) * r, Math.cos(a) * r, 0.09);
+  t.rotation.z = -a;
+  clock.add(t);
+}
+
+/* Hands pivot at the dial centre, so each is built inside a group whose
+   origin IS the pivot and offset half its own length — rotating the mesh
+   directly would spin it about its middle. */
+function makeHand(len, width, material) {
+  const pivot = new THREE.Group();
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, len, 0.035), material);
+  mesh.position.y = len / 2;
+  pivot.add(mesh);
+  clock.add(pivot);
+  return pivot;
+}
+
+const handMat = new THREE.MeshStandardMaterial({ color: 0xF2F4EF, metalness: 0.3, roughness: 0.35 });
+const secMat  = new THREE.MeshStandardMaterial({
+  color: LIME_BRIGHT, metalness: 0.2, roughness: 0.3,
+  emissive: LIME_BRIGHT, emissiveIntensity: 0.9,
+});
+
+const hourHand = makeHand(0.78, 0.055, handMat);   hourHand.position.z = 0.11;
+const minHand  = makeHand(1.10, 0.038, handMat);   minHand.position.z  = 0.13;
+const secHand  = makeHand(1.22, 0.016, secMat);    secHand.position.z  = 0.15;
+
+const pivotCap = new THREE.Mesh(
+  new THREE.SphereGeometry(0.062, 24, 24),
+  new THREE.MeshStandardMaterial({
+    color: LIME_BRIGHT, emissive: LIME_BRIGHT, emissiveIntensity: 1.1,
+    metalness: 0.2, roughness: 0.25,
+  }),
+);
+pivotCap.position.z = 0.18;
+clock.add(pivotCap);
+
+// ---- interaction -----------------------------------------------------------
+const pointer = { x: 0, y: 0 };
+if (!reduceMotion) {
+  addEventListener('pointermove', (e) => {
+    // Normalised to the viewport, not the canvas: the parallax should track
+    // the pointer even while it's over the headline beside the clock.
+    pointer.x = (e.clientX / innerWidth) * 2 - 1;
+    pointer.y = (e.clientY / innerHeight) * 2 - 1;
+  }, { passive: true });
+}
+
+// ---- sizing ----------------------------------------------------------------
+// Checked every frame against the canvas's own CSS box rather than driven by
+// a resize event or ResizeObserver. Those can miss — an observer that doesn't
+// re-fire leaves the drawing buffer stuck at its first size while the element
+// scales up, which renders a blurry upscale of the original. Comparing the
+// two sizes each frame cannot drift, and setSize() is skipped when they match
+// so there's no per-frame cost.
+function syncSize() {
+  const canvas = renderer.domElement;
+  const w = Math.floor(canvas.clientWidth);
+  const h = Math.floor(canvas.clientHeight);
+  if (!w || !h) return;
+  const dpr = Math.min(devicePixelRatio, 2);
+  if (canvas.width === Math.floor(w * dpr) && canvas.height === Math.floor(h * dpr)) return;
+  renderer.setPixelRatio(dpr);
+  renderer.setSize(w, h, false);          // false: CSS box is owned by .stage
+  camera.aspect = w / h;
+  frameSubject();
+  camera.updateProjectionMatrix();
+}
+
+/* Pull the camera back far enough that the dial fits BOTH axes.
+   The canvas is now the full hero, so its aspect swings from ~1.8 (wide
+   desktop) to ~0.46 (phone). A PerspectiveCamera's fov is VERTICAL only, so a
+   fixed distance that frames the clock nicely on desktop slices its left and
+   right edges off on a portrait phone — the horizontal field is aspect times
+   narrower. Taking the max of the two required distances means the binding
+   axis wins: height on wide screens, width on tall ones.
+
+   FIT_RADIUS covers the dial and bezel plus a little air. The outer rings sit
+   well beyond it and are MEANT to run off the edges — that full-bleed crop is
+   the composition, not an accident. */
+const FIT_RADIUS = 2.05;
+function frameSubject() {
+  const vFov = (camera.fov * Math.PI) / 180;
+  const distV = FIT_RADIUS / Math.tan(vFov / 2);
+  const distH = FIT_RADIUS / (Math.tan(vFov / 2) * camera.aspect);
+  camera.position.z = Math.max(distV, distH);
+}
+
+syncSize();   // size once up front so the first rendered frame is already correct
+
+// ---- loop ------------------------------------------------------------------
+// Paused whenever the hero scrolls out of view or the tab is hidden — a
+// WebGL loop running behind the footer is pure battery drain.
+let visible = true;
+new IntersectionObserver(([e]) => { visible = e.isIntersecting; }, { threshold: 0.01 }).observe(stage);
+
+const t0 = performance.now();
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (!visible || document.hidden) return;
+
+  syncSize();
+
+  const t = (now - t0) / 1000;
+
+  if (!reduceMotion) {
+    rings.forEach((m) => { m.rotation.z += m.userData.speed * 0.016; });
+
+    // Ease toward the pointer instead of tracking it exactly, so a fast
+    // flick reads as weight rather than a snap.
+    rig.rotation.y += (pointer.x * 0.20 - rig.rotation.y) * 0.045;
+    rig.rotation.x += (pointer.y * 0.14 - rig.rotation.x) * 0.045;
+
+    // Slow breathing drift keeps it alive when nobody's moving the mouse.
+    clock.position.y = Math.sin(t * 0.5) * 0.045;
+
+    // The rim light's intensity pulses very slightly — enough to feel lit
+    // rather than painted, not enough to read as flashing.
+    rim.intensity = 55 + Math.sin(t * 0.8) * 7;
+  }
+
+  // Real time, smooth sweep on the second hand. Negative because SVG/Three
+  // rotate counter-clockwise about +Z and clocks do not.
+  const d = new Date();
+  const sec = d.getSeconds() + d.getMilliseconds() / 1000;
+  const min = d.getMinutes() + sec / 60;
+  const hr  = (d.getHours() % 12) + min / 60;
+
+  secHand.rotation.z  = -(sec / 60) * Math.PI * 2;
+  minHand.rotation.z  = -(min / 60) * Math.PI * 2;
+  hourHand.rotation.z = -(hr / 12) * Math.PI * 2;
+
+  renderer.render(scene, camera);
+}
+requestAnimationFrame(frame);
+
+// Three.js is up — retire the CSS clock.
+document.getElementById('fallbackClock').classList.add('is-hidden');
+</script>
+
+</body>
+</html>

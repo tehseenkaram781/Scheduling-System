@@ -1,0 +1,11 @@
+-- v10 — self-service profile picture.
+--
+-- Held as a data: URL in a TEXT column rather than a file path or object-store
+-- key: this app has no upload pipeline or blob storage, and adding one for a
+-- single avatar would be disproportionate. The client downscales to 256px and
+-- re-encodes as JPEG before sending, and the DTO caps the string length, so the
+-- stored value stays in the tens-of-KB range.
+--
+-- NULL means "no picture set" — the UI falls back to the initials avatar that
+-- every account uses today, so existing rows need no backfill.
+ALTER TABLE "users" ADD COLUMN "avatar_url" TEXT;

@@ -1,0 +1,84 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Time Ops</title>
+  <link rel="stylesheet" href="styles.css">
+  <script>
+    (function () {
+      var m = document.cookie.match(/(?:^|; )theme=(light|dark)/);
+      var t = m ? m[1] : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
+</head>
+<body>
+  <!-- Single merged sidebar: wordmark on top, nav rows, profile card pinned to
+       the bottom. Clicking the profile card opens the Profile Settings panel
+       UPWARD into the empty space above it, so it never covers the nav. -->
+  <aside class="rail">
+    <!-- Brand: emblem + wordmark. Inline SVG rather than an image file so it
+         inherits currentColor, stays crisp at any DPI, and needs no extra
+         request — same approach as every other icon in the app. -->
+    <a href="#" class="rail-brand" id="railBrand" aria-label="Time Ops — home">
+      <svg class="brand-mark-svg" viewBox="0 0 64 64" aria-hidden="true">
+        <!-- outer ring -->
+        <circle cx="32" cy="32" r="29" />
+        <!-- inner ring, with the tick dots sitting in the channel between -->
+        <circle cx="32" cy="32" r="22" />
+        <g class="brand-ticks">
+          <circle cx="32" cy="6.5" r="1.5" /><circle cx="45" cy="10" r="1.5" />
+          <circle cx="54" cy="19" r="1.5" /><circle cx="57.5" cy="32" r="1.5" />
+          <circle cx="54" cy="45" r="1.5" /><circle cx="45" cy="54" r="1.5" />
+          <circle cx="32" cy="57.5" r="1.5" /><circle cx="19" cy="54" r="1.5" />
+          <circle cx="10" cy="45" r="1.5" /><circle cx="6.5" cy="32" r="1.5" />
+          <circle cx="10" cy="19" r="1.5" /><circle cx="19" cy="10" r="1.5" />
+        </g>
+        <!-- crossed hands, meeting at the pivot -->
+        <path d="M32 32 L18 20" /><path d="M32 32 L46 20" />
+        <path d="M32 32 L32 46" />
+        <circle class="brand-pivot" cx="32" cy="32" r="3" />
+      </svg>
+      <span class="brand-word">TIME OPS</span>
+    </a>
+    <nav id="nav" class="rail-nav"></nav>
+    <div class="rail-spacer"></div>
+    <!-- Anchor for the upward-opening panel; the panel is a sibling so it can
+         be positioned relative to this wrapper without clipping. -->
+    <div class="rail-foot">
+      <div id="profileMenu" class="profile-menu" hidden></div>
+      <button type="button" class="rail-user" id="profileCard" aria-haspopup="true" aria-expanded="false">
+        <div class="avatar" id="avatar">–</div>
+        <div class="rail-user-meta">
+          <div class="name" id="userName">…</div>
+          <div class="role" id="userRole"></div>
+        </div>
+        <svg class="icon rail-user-caret" viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg>
+      </button>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <div id="view"></div>
+  </main>
+
+  <!-- Kebab (⋯) context menu — holds the per-page controls that used to live in
+       the secondary panel (People switch, Approvals tabs, Dashboard picker, …).
+       Persistent so it survives view re-renders; opened from the header button.
+       #sidebarContext keeps its id, so the existing per-tab context renderers
+       work unchanged — they just render in here now. -->
+  <div id="ctxMenu" class="ctx-menu" hidden><div id="sidebarContext" class="panel-context"></div></div>
+
+  <!-- Modal mount -->
+  <div id="modalMount"></div>
+
+  <!-- Mobile bottom nav (4 primary + More) + More sheet — populated by app.js -->
+  <nav class="bottom-nav" id="bottomNav" aria-label="Primary"></nav>
+  <div class="more-scrim" id="moreScrim" hidden></div>
+  <div class="more-sheet" id="moreSheet"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

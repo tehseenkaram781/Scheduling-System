@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Codebase Overview — Scheduling System</title>
+<style>
+  :root {
+    --bg: #f6f7f5; --card: #ffffff; --border: #e2e4dc; --text1: #101114; --text2: #555860; --text3: #9195a0;
+    --accent: #4a7c2f; --accent-bg: #eaf3e0; --accent-contrast: #ffffff;
+    --code-bg: #1e2124; --code-text: #e8eae6;
+    --radius: 14px; --radius-sm: 8px;
+    --mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0c0d0f; --card: #16181b; --border: #2a2d31; --text1: #f2f3f0; --text2: #a7abb5; --text3: #6a6e78;
+      --accent: #9fd66f; --accent-bg: rgba(159,214,111,0.14); --accent-contrast: #10130a;
+      --code-bg: #0a0b0d; --code-text: #d8dbd4;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text1); font-family: var(--sans); }
+  body { line-height: 1.55; font-size: 16px; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 32px 20px 100px; }
+  h1 { font-size: 28px; font-weight: 800; letter-spacing: -0.02em; margin: 0 0 6px; }
+  h2 { font-size: 22px; font-weight: 750; letter-spacing: -0.01em; margin: 48px 0 6px; padding-top: 12px; border-top: 1px solid var(--border); }
+  h2 .num { color: var(--accent); font-variant-numeric: tabular-nums; margin-right: 8px; }
+  h3 { font-size: 16px; font-weight: 700; margin: 22px 0 8px; }
+  p { color: var(--text2); margin: 10px 0; }
+  a { color: var(--accent); }
+  .lede { color: var(--text2); font-size: 15px; margin-top: 0; }
+  .meta-bar {
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 12px 16px; margin: 18px 0 8px; font-size: 13px; color: var(--text2);
+  }
+  .meta-bar strong { color: var(--text1); }
+  .stale-note {
+    background: var(--accent-bg); border: 1px solid var(--accent); border-left-width: 4px;
+    border-radius: var(--radius-sm); padding: 10px 14px; font-size: 13.5px; color: var(--text1); margin: 10px 0 0;
+  }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 18px 20px; margin: 14px 0;
+  }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 620px) { .grid2 { grid-template-columns: 1fr; } }
+  .term { font-weight: 700; color: var(--text1); }
+  .def-box {
+    background: var(--accent-bg); border-radius: var(--radius-sm); padding: 10px 14px;
+    margin: 10px 0; font-size: 14.5px;
+  }
+  .def-box .term { color: var(--accent); }
+  code, .code-inline {
+    font-family: var(--mono); font-size: 0.87em; background: var(--code-bg); color: var(--code-text);
+    padding: 2px 6px; border-radius: 5px; white-space: nowrap;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-text); font-family: var(--mono); font-size: 13px;
+    padding: 14px 16px; border-radius: var(--radius-sm); overflow-x: auto; line-height: 1.5;
+  }
+  pre code { background: none; padding: 0; white-space: pre; }
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--text3); font-weight: 650; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+  tr:last-child td { border-bottom: none; }
+  .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+  .table-wrap table { margin: 0; }
+  .table-wrap th, .table-wrap td { border-color: var(--border); }
+  .badge {
+    display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 999px;
+  }
+  .badge.runtime { background: var(--accent-bg); color: var(--accent); }
+  .badge.dev { background: var(--border); color: var(--text2); }
+  .badge.unused { background: #f3d9d9; color: #a33; }
+  @media (prefers-color-scheme: dark) { .badge.unused { background: rgba(220,90,90,0.18); color: #e88; } }
+  .toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 0; }
+  .toc a {
+    text-decoration: none; font-size: 13px; font-weight: 600; color: var(--text2);
+    background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 6px 13px;
+  }
+  .toc a:hover { color: var(--accent); border-color: var(--accent); }
+  .diagram {
+    display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap;
+    padding: 26px 10px; margin: 16px 0;
+  }
+  .dbox {
+    background: var(--card); border: 1.5px solid var(--border); border-radius: var(--radius);
+    padding: 16px 18px; min-width: 150px; text-align: center; flex: 1 1 150px;
+  }
+  .dbox .big { font-size: 26px; }
+  .dbox .lbl { font-weight: 750; margin-top: 4px; font-size: 14.5px; }
+  .dbox .sub { font-size: 12px; color: var(--text3); margin-top: 3px; }
+  .dbox.browser { border-color: #6b9bd1; }
+  .dbox.backend { border-color: var(--accent); }
+  .dbox.db { border-color: #c99b3f; }
+  .arrow { font-size: 22px; color: var(--text3); flex: 0 0 auto; }
+  .steps { counter-reset: step; list-style: none; margin: 14px 0; padding: 0; }
+  .steps li {
+    counter-increment: step; position: relative; padding: 4px 0 16px 40px; border-left: 2px solid var(--border);
+    margin-left: 14px; font-size: 14.5px; color: var(--text2);
+  }
+  .steps li:last-child { border-left-color: transparent; padding-bottom: 0; }
+  .steps li::before {
+    content: counter(step); position: absolute; left: -15px; top: 0;
+    width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: var(--accent-contrast);
+    font-weight: 800; font-size: 13px; display: flex; align-items: center; justify-content: center;
+  }
+  .steps li strong { color: var(--text1); }
+  .steps .file { color: var(--accent); font-family: var(--mono); font-size: 0.88em; }
+  .quick-jump { position: sticky; top: 12px; z-index: 5; }
+  ul, ol { color: var(--text2); }
+  ul li, ol li { margin: 4px 0; }
+  .foot { margin-top: 60px; padding-top: 18px; border-top: 1px solid var(--border); color: var(--text3); font-size: 13px; }
+  .pill-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+  .pill {
+    font-size: 12px; font-weight: 650; padding: 3px 10px; border-radius: 999px;
+    background: var(--border); color: var(--text2);
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Codebase Overview</h1>
+  <p class="lede">A plain-language guide to the <strong>Scheduling System</strong> project — what it is, how its pieces fit together, and where to look when you want to change something.</p>
+
+  <div class="meta-bar">
+    📅 <strong>Last generated: July 30, 2026</strong>
+    <span style="margin-left:auto">⚠️ Regenerate this file if the project's folders, files, or dependencies change significantly — it is a snapshot, not a live view, and will go stale.</span>
+  </div>
+
+  <nav class="toc">
+    <a href="#big-picture">1. Big picture</a>
+    <a href="#folder-map">2. Folder map</a>
+    <a href="#commands">3. Commands</a>
+    <a href="#flows">4. Request flows</a>
+    <a href="#lookup">5. Where things live</a>
+    <a href="#deps">6. Dependencies</a>
+  </nav>
+
+  <!-- ================================================================ -->
+  <h2 id="big-picture"><span class="num">1</span>The big picture</h2>
+  <p>This project is a <strong>timesheet and project-management web app</strong>. People log the hours they worked on a project, a manager reviews and approves those hours, and the app keeps a running record of who did what, when, and whether it's been signed off.</p>
+
+  <p>Like almost every modern web app, it's really <strong>two separate programs</strong> that talk to each other over the internet (even when both are running on your own computer):</p>
+
+  <div class="grid2">
+    <div class="card">
+      <div class="term">🖥️ The browser-side app ("frontend")</div>
+      <p style="margin-top:6px">This is what you actually see and click — the timesheet grid, the login screen, the buttons. It's plain HTML (the page structure), CSS (the colors and layout), and JavaScript (the interactivity) that your web browser downloads and runs directly. It lives in the <code>public/</code> folder.</p>
+    </div>
+    <div class="card">
+      <div class="term">⚙️ The server-side app ("backend")</div>
+      <p style="margin-top:6px">A <span class="term" style="font-weight:650">"backend"</span> or <span class="term" style="font-weight:650">"server"</span> is just a program that runs on a computer somewhere (here, your own machine during development) and waits for the browser app to ask it for things — like "log in this person" or "give me this week's hours." It's the only part allowed to talk to the database, and it's where the rules live (who can see what, who can approve what). It's built with a toolkit called <strong>NestJS</strong> and lives in the <code>src/</code> folder.</p>
+    </div>
+  </div>
+
+  <p>Neither half can do its job alone. The frontend has no memory — refresh the page and everything it "knew" is gone unless it asks the backend again. The backend has no buttons or screens — it only responds to requests. A <strong>database</strong> (here, PostgreSQL — a program that stores structured data permanently on disk, like a very powerful spreadsheet) is the third piece: it's where every timesheet entry, user, and project actually lives between requests.</p>
+
+  <h3>How the three pieces are arranged</h3>
+  <div class="diagram">
+    <div class="dbox browser">
+      <div class="big">🖥️</div>
+      <div class="lbl">Browser</div>
+      <div class="sub">public/app.js<br>runs on your screen</div>
+    </div>
+    <div class="arrow">⇄</div>
+    <div class="dbox backend">
+      <div class="big">⚙️</div>
+      <div class="lbl">Backend API</div>
+      <div class="sub">src/ (NestJS)<br>enforces the rules</div>
+    </div>
+    <div class="arrow">⇄</div>
+    <div class="dbox db">
+      <div class="big">🗄️</div>
+      <div class="lbl">Database</div>
+      <div class="sub">PostgreSQL<br>stores everything</div>
+    </div>
+  </div>
+  <p style="text-align:center;font-size:13px;color:var(--text3);margin-top:-8px">The browser never talks to the database directly — only the backend is allowed to, which is exactly how the rules ("only a manager can approve") get enforced.</p>
+
+  <h3>One concrete example, start to finish</h3>
+  <p>Here's literally what happens when a team member clicks <strong>"Submit for review"</strong> on their weekly timesheet:</p>
+  <ol class="steps">
+    <li>The click runs a JavaScript function called <span class="file">submitWeek()</span> inside <span class="file">public/app.js</span>. It sends a message to the backend: "please submit my hours for the week starting July 27."</li>
+    <li>That message travels over the network (even if it's just to <code>localhost</code>, your own machine) to an <strong>address</strong> the backend is listening on: <code>POST /api/approvals/submit</code>.</li>
+    <li>On the backend, a file called <span class="file">src/approvals/approvals.controller.ts</span> is the "door" for that address. It hands the request to a file called <span class="file">approvals.service.ts</span>, which does the actual work.</li>
+    <li>The service checks the database: does this person have any hours logged this week? If not, it refuses. If so, it creates (or updates) a row in a database table called <code>Approval</code>, marking it <code>SUBMITTED</code> — this is what "locks" the week from further editing.</li>
+    <li>It also writes an audit-log entry (a permanent record of "who did what, when") and sends a notification to every Project Manager, so it shows up in their Inbox.</li>
+    <li>The backend sends a response back saying "done." The browser app re-fetches the week's data and re-draws the screen — now showing a "Submitted" badge and no more editable boxes.</li>
+  </ol>
+  <p>Every action in this app — logging in, logging hours, approving a week — follows this same shape: <strong>click → message to backend → backend checks the rules and touches the database → response → screen updates.</strong> Section 4 walks through three more of these in full detail.</p>
+
+  <!-- ================================================================ -->
+  <h2 id="folder-map"><span class="num">2</span>Folder-by-folder map</h2>
+  <p>Everything below lives at the top of the project. You will spend almost all of your time in <code>public/</code>, <code>src/</code>, and <code>prisma/</code> — the rest is configuration you'll rarely open.</p>
+
+  <div class="card">
+    <h3>📁 <code>public/</code> — everything the browser downloads and runs</h3>
+    <p>This is the entire frontend. There's no build step for it — the files are plain HTML/CSS/JavaScript exactly as the browser reads them.</p>
+    <table>
+      <tr><th>File</th><th>What it is</th><th>When you'd open it</th></tr>
+      <tr><td><code>login.html</code></td><td>The sign-in page — email/password form.</td><td>Changing the login screen's look or the sign-in logic.</td></tr>
+      <tr><td><code>app.html</code></td><td>The empty "shell" of the main app — the sidebar, header, and a handful of empty containers. Almost all of the actual content is injected into it by JavaScript after the page loads.</td><td>Rarely — mostly just structural placeholders.</td></tr>
+      <tr><td><code>app.js</code></td><td>The single largest file in the project (~2,000 lines). It contains <em>every</em> screen: the timesheet grid, calendar, approvals inbox, dashboards, admin panel, etc. It fetches data from the backend, builds HTML out of it, and reacts to every click.</td><td>Any time you want to change what a screen looks like, what a button does, or add a new page.</td></tr>
+      <tr><td><code>styles.css</code></td><td>Every color, spacing value, font, and layout rule in the app, for both light and dark theme.</td><td>Changing colors, fonts, spacing, or visual styling of anything.</td></tr>
+      <tr><td><code>index.html</code></td><td>The very first page a visitor hits; redirects to either <code>login.html</code> or <code>app.html</code>.</td><td>Almost never.</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>📁 <code>src/</code> — the backend (NestJS) code</h3>
+    <p><strong>NestJS</strong> is a toolkit for building backends in a very organized, repeatable way. It encourages splitting each area of functionality (projects, time entries, approvals…) into its own small folder, and each folder almost always contains the same three kinds of file:</p>
+    <div class="grid2">
+      <div class="def-box"><span class="term">*.controller.ts</span> — the "door." Defines which web addresses exist (e.g. <code>POST /approvals/submit</code>) and which function handles each one. It does no real work itself — it just receives the request and immediately hands it off.</div>
+      <div class="def-box"><span class="term">*.service.ts</span> — the "worker." Contains the actual logic: checking rules, reading/writing the database, sending notifications. This is almost always the file you want when you're asking "what actually happens when X occurs?"</div>
+      <div class="def-box"><span class="term">dto.ts</span> ("Data Transfer Object") — describes the exact shape of data a request is allowed to send in, and validates it automatically (e.g. "email must be a valid email," "hours must be a positive number"). Bad data gets rejected before the service even runs.</div>
+      <div class="def-box"><span class="term">*.module.ts</span> — a short file that just lists "here is this feature's controller and service" so NestJS knows they exist. You'll rarely need to edit these except when creating a brand-new feature folder.</div>
+    </div>
+    <p>The feature folders in this project: <code>auth/</code> (login/tokens), <code>users/</code>, <code>teams/</code>, <code>roles/</code>, <code>projects/</code>, <code>clients/</code>, <code>subtasks/</code>, <code>assignments/</code>, <code>time-entries/</code>, <code>timesheet-rows/</code>, <code>approvals/</code>, <code>edit-requests/</code>, <code>notifications/</code>, <code>audit/</code>, <code>dashboards/</code>, <code>analytics/</code>.</p>
+    <h3 style="margin-top:24px">Two special folders inside <code>src/</code></h3>
+    <table>
+      <tr><th>Folder</th><th>What it's for</th></tr>
+      <tr><td><code>src/rbac/</code></td><td><strong>RBAC</strong> stands for <em>Role-Based Access Control</em> — the system that decides who is allowed to do what. <code>permissions.ts</code> is a single table mapping each action (e.g. "approve a timesheet") to the roles allowed to do it (e.g. only Project Managers). <code>roles.guard.ts</code> is the code that actually checks that table on every single request before anything else runs. This is the single most important file for understanding "who can do what" in the whole app.</td></tr>
+      <tr><td><code>src/common/</code></td><td>Small shared helper files used across many features — things like hashing passwords, writing audit-log entries, sending notifications, and date-range math. Not a "feature" of its own, just shared plumbing.</td></tr>
+    </table>
+    <h3 style="margin-top:24px">Two files at the top of <code>src/</code></h3>
+    <table>
+      <tr><td style="white-space:nowrap"><code>main.ts</code></td><td>The very first thing that runs when the backend starts. It creates the app, tells it to serve the <code>public/</code> folder as the website, and starts listening for requests on port 3000.</td></tr>
+      <tr><td style="white-space:nowrap"><code>app.module.ts</code></td><td>The master wiring list — every feature folder above gets registered here. If a new feature folder is added but not listed here, the backend will act as if it doesn't exist.</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>📁 <code>prisma/</code> — the database blueprint and history</h3>
+    <p><strong>Prisma</strong> is the tool this project uses to talk to the PostgreSQL database without writing raw database code by hand.</p>
+    <div class="def-box"><span class="term">schema.prisma</span> — the "schema" is a plain-English-ish blueprint of every table in the database (Users, Projects, TimeEntries, Approvals, …) and every column each table has. Change this file when you want the database itself to store something new or different.</div>
+    <div class="def-box"><span class="term">migrations/</span> — every time the schema changes, Prisma writes a small, dated file recording <em>exactly</em> what changed in the real database (e.g. "add this column"). This folder is a <strong>historical record</strong>, like a diary — <strong>never hand-edit an existing file in here.</strong> If you need to change the database, you edit <code>schema.prisma</code> and let Prisma generate a brand-new migration file for you.</div>
+    <div class="def-box"><span class="term">seed.ts</span> — a script that fills an empty database with realistic fake demo data (sample users, projects, weeks of timesheet history) so the app isn't blank when you first run it.</div>
+  </div>
+
+  <div class="card">
+    <h3>📁 <code>scripts/</code> — one-off utility scripts</h3>
+    <p>This folder currently has no files in it. It exists as a place for small, standalone maintenance scripts (things run by hand occasionally, not part of the running app) — for example, a one-time data-repair script. There's nothing here to run right now.</p>
+  </div>
+
+  <div class="card">
+    <h3>📄 Other files worth knowing</h3>
+    <table>
+      <tr><td style="white-space:nowrap"><code>README.md</code></td><td>The project's own written overview — what it is, how to set it up, and a list of what every backend address (<span class="code-inline">API</span> endpoint) does. Good first stop if you want a more technical summary than this document.</td></tr>
+      <tr><td style="white-space:nowrap"><code>package.json</code></td><td>Two things at once: (1) the full list of external code libraries this project depends on (see Section 6), and (2) a set of named shortcuts for common tasks, explained in Section 3.</td></tr>
+      <tr><td style="white-space:nowrap"><code>tsconfig.json</code> / <code>tsconfig.build.json</code></td><td>Settings for <strong>TypeScript</strong>, the language the backend is written in (it's JavaScript with extra optional "this variable must be a number" style checks). These files configure how strict those checks are and how the code gets compiled.</td></tr>
+      <tr><td style="white-space:nowrap"><code>nest-cli.json</code></td><td>Configuration for the NestJS command-line tool — mostly just tells it where the source code lives.</td></tr>
+      <tr><td style="white-space:nowrap"><code>dist/</code></td><td>Not source code — this is the compiled, ready-to-run version of everything in <code>src/</code>, automatically regenerated every time you build the project. You never hand-edit anything in here.</td></tr>
+      <tr><td style="white-space:nowrap"><code>node_modules/</code></td><td>Where all the external libraries from <code>package.json</code> actually get downloaded to. Enormous (hundreds of folders) and entirely automatic — see Section 6.</td></tr>
+    </table>
+  </div>
+
+  <!-- ================================================================ -->
+  <h2 id="commands"><span class="num">3</span>"What does X command do?"</h2>
+  <p>These are the exact shortcuts defined in this project's <code>package.json</code>, under <code>"scripts"</code>. You run them by typing <code>npm run</code> followed by the name (a couple have no <code>run</code>, noted below).</p>
+
+  <div class="table-wrap">
+    <table>
+      <tr><th>Command</th><th>What it actually does here</th><th>When to use it / what you'll see</th></tr>
+      <tr>
+        <td><code>npm run build</code></td>
+        <td>Runs <code>nest build</code>, which reads every TypeScript file in <code>src/</code>, checks it for errors, and compiles it into plain JavaScript, writing the result into <code>dist/</code>.</td>
+        <td>Before deploying, or any time you want to double-check the backend code compiles cleanly with no errors. You'll see a short pause and then either silence (success) or a list of type errors.</td>
+      </tr>
+      <tr>
+        <td><code>npm run start:dev</code></td>
+        <td>Starts the backend using <code>nest start --watch</code> — it runs the server <em>and</em> keeps watching every source file. Any time you save a change, it automatically rebuilds and restarts itself.</td>
+        <td>This is the command you use while actively working on the backend. You'll see log lines listing every route the server registered, then <code>Scheduling system running on http://localhost:3000</code>.</td>
+      </tr>
+      <tr>
+        <td><code>npm run start</code></td>
+        <td>Starts the backend once (<code>nest start</code>), with no auto-restart on changes.</td>
+        <td>Rarely used directly — <code>start:dev</code> is almost always more convenient during development.</td>
+      </tr>
+      <tr>
+        <td><code>npm run start:prod</code></td>
+        <td>Runs <code>node dist/main</code> — starts the <em>already-compiled</em> version from the <code>dist/</code> folder directly, skipping any compilation step.</td>
+        <td>Only works after you've run <code>npm run build</code> first. This is how the app would actually run in a real deployed environment.</td>
+      </tr>
+      <tr>
+        <td><code>npm run prisma:generate</code></td>
+        <td>Runs <code>prisma generate</code>. Reads <code>schema.prisma</code> and regenerates the internal code the backend uses to talk to the database in a type-safe way (this is the "<code>@prisma/client</code>" library mentioned in Section 6).</td>
+        <td>Run this any time <code>schema.prisma</code> changes, or if you get errors mentioning a database field that "doesn't exist" even though you just added it to the schema.</td>
+      </tr>
+      <tr>
+        <td><code>npm run prisma:migrate</code></td>
+        <td>Runs <code>prisma migrate dev</code>. Compares <code>schema.prisma</code> against the real database, asks you to name the change, writes a new dated file into <code>prisma/migrations/</code>, and applies it to your local database immediately.</td>
+        <td>Run this any time you've edited <code>schema.prisma</code> and want the actual database to catch up. It will prompt you in the terminal for a short name describing the change.</td>
+      </tr>
+      <tr>
+        <td><code>npm run prisma:studio</code></td>
+        <td>Runs <code>prisma studio</code> — opens a visual, spreadsheet-like web page (usually at <code>localhost:5555</code>) where you can browse and manually edit every row in every database table.</td>
+        <td>Use this when you want to look at (or quickly hand-edit) the actual data currently sitting in the database, without writing any code.</td>
+      </tr>
+      <tr>
+        <td><code>npm run db:seed</code></td>
+        <td>Runs <code>ts-node prisma/seed.ts</code> directly — executes the seed script described in Section 2, wiping and refilling the database with demo users, projects, and weeks of sample timesheet data.</td>
+        <td>Run this right after setting up the database for the first time, or any time you want to reset back to a clean, realistic demo state.</td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- ================================================================ -->
+  <h2 id="flows"><span class="num">4</span>How a request actually flows through the app</h2>
+  <p>Three real actions in this app, traced click-by-click across both halves. This is the part that actually shows how the frontend and backend fit together — read it slowly the first time.</p>
+
+  <h3>🔐 Flow 1 — Logging into the app</h3>
+  <ol class="steps">
+    <li>You type an email and password into <span class="file">public/login.html</span> and hit the login button. That page has a small <code>&lt;script&gt;</code> block at the bottom that listens for the form being submitted.</li>
+    <li>The script sends a request to <code>POST /api/auth/login</code>, with your email and password as the message body.</li>
+    <li>On the backend, <span class="file">src/auth/auth.controller.ts</span> receives it at its <code>login()</code> function. Notice it's marked <code>@Public()</code> — a special marker meaning "this one endpoint doesn't require you to already be logged in," which makes sense since logging in is how you <em>become</em> logged in.</li>
+    <li>The controller hands off to <span class="file">src/auth/auth.service.ts</span>'s <code>login()</code> function, which looks the user up in the database by email, and checks the password against a securely-hashed copy stored there (never the real password — see <code>bcryptjs</code> in Section 6).</li>
+    <li>If it matches, the service creates a signed <strong>JWT</strong> — a tamper-proof digital token that says "this is user X, and their role is Y" — and hands back two of them: a short-lived <em>access token</em> and a longer-lived <em>refresh token</em> (used to quietly get a new access token later without forcing you to log in again).</li>
+    <li>Back in the browser, the tokens and your user info are saved into <code>sessionStorage</code> (a small storage area tied to your browser tab), and the page redirects to <code>app.html</code>. From then on, every request the frontend makes includes that access token, proving who's asking.</li>
+  </ol>
+
+  <h3>📤 Flow 2 — Submitting a timesheet for review</h3>
+  <ol class="steps">
+    <li>Inside the main app, you click <strong>"Submit for review"</strong> on your weekly timesheet. That button was drawn by a function in <span class="file">public/app.js</span> and its click runs <code>window.submitWeek()</code>.</li>
+    <li><code>submitWeek()</code> first does a quick, friendly sanity check entirely in the browser — it looks at which weekdays have no hours logged at all and, if any are found, asks "are you sure?" before continuing. This is just a courtesy prompt; it isn't a security rule.</li>
+    <li>It then sends <code>POST /api/approvals/submit</code> with the week's start date.</li>
+    <li><span class="file">src/approvals/approvals.controller.ts</span> receives it at <code>submit()</code>. Notice there's no <code>@Roles(...)</code> restriction on this one — <em>any</em> logged-in role can submit, because everyone submits their own timesheet.</li>
+    <li>It hands off to <span class="file">approvals.service.ts</span>'s <code>submit()</code> function, which: checks the database for at least one logged hour that week (refuses otherwise), checks the week isn't already locked, then creates or updates a database row in the <code>Approval</code> table with status <code>SUBMITTED</code>.</li>
+    <li>In the same database transaction (a group of database changes that either all succeed together or all fail together, so the data can never end up half-changed), it also writes an audit-log row and sends a notification to every Project Manager.</li>
+    <li>The response comes back, and <code>submitWeek()</code> calls <code>refresh()</code>, which re-fetches the week and re-draws the table — now showing a "Submitted" badge, with editing disabled.</li>
+  </ol>
+
+  <h3>✅ Flow 3 — A Project Manager approving someone's hours</h3>
+  <ol class="steps">
+    <li>The PM opens the <strong>Approvals</strong> inbox and clicks <strong>"Approve"</strong> next to a submitted week. That runs <code>window.reviewApprove(userId, weekStart)</code> in <span class="file">app.js</span>.</li>
+    <li>It sends <code>POST /api/approvals/approve</code> with the target user's ID and the week.</li>
+    <li><span class="file">approvals.controller.ts</span> receives it at <code>approve()</code> — this one <em>is</em> restricted with <code>@Roles(Role.PM)</code>, so the very first thing that happens, before any of your code even runs, is NestJS checking the requester's role from their JWT. Anyone who isn't a PM gets an automatic "forbidden" error and the request never reaches the service at all.</li>
+    <li><span class="file">approvals.service.ts</span>'s <code>approve()</code> function looks up that week's <code>Approval</code> row, confirms it's actually in <code>SUBMITTED</code> status (you can't approve something twice, or something never submitted), then — inside one transaction — marks the approval <code>APPROVED</code>, marks every pending time entry that week <code>APPROVED</code>, writes an audit-log entry, and sends a notification back to the original employee.</li>
+    <li>It also recalculates that project's running hours totals (a summary table used by dashboards), so charts stay accurate without having to add up every entry from scratch every time someone looks at them.</li>
+    <li>The response comes back, the Approvals inbox re-renders that row as approved, and the next time the employee loads their timesheet or notifications, they'll see it's been approved.</li>
+  </ol>
+
+  <!-- ================================================================ -->
+  <h2 id="lookup"><span class="num">5</span>Where things live — quick reference</h2>
+  <p>The table you'll come back to most. When you want to change something, start here.</p>
+  <div class="table-wrap">
+    <table>
+      <tr><th>If I want to…</th><th>I should look in…</th></tr>
+      <tr><td>Change what text a button, label, or title says</td><td><code>public/app.js</code> — search for the text itself; almost all screen content is built there. (A few fixed pieces live directly in <code>public/app.html</code> or <code>login.html</code>.)</td></tr>
+      <tr><td>Change a business rule — like <em>who is allowed to approve timesheets</em></td><td><code>src/rbac/permissions.ts</code> for the role-level rule, and the relevant <code>*.service.ts</code> file (e.g. <code>src/approvals/approvals.service.ts</code>) for anything more specific, like "only your own team."</td></tr>
+      <tr><td>Change the database structure — add/remove/rename a field or table</td><td><code>prisma/schema.prisma</code>, then run <code>npm run prisma:migrate</code> to generate and apply the change. Never edit files already inside <code>prisma/migrations/</code>.</td></tr>
+      <tr><td>Change colors, spacing, fonts, or any visual styling</td><td><code>public/styles.css</code>.</td></tr>
+      <tr><td>Add a brand-new page/screen to the app</td><td>A new "render" function and a new entry in the navigation list inside <code>public/app.js</code>; if it needs its own data, a matching new controller/service pair under <code>src/</code> (following the pattern of an existing feature folder).</td></tr>
+      <tr><td>Change what happens when a form is submitted (the actual logic/side effects)</td><td>The relevant <code>*.service.ts</code> file under <code>src/&lt;feature&gt;/</code> — the controller just receives the request, the service does the work.</td></tr>
+      <tr><td>Change what input values are allowed/required on a form (validation)</td><td>The relevant <code>dto.ts</code> file under <code>src/&lt;feature&gt;/</code>.</td></tr>
+      <tr><td>Change login behavior, tokens, or session length</td><td><code>src/auth/</code>.</td></tr>
+      <tr><td>Change what a dashboard chart shows or how it's calculated</td><td><code>src/dashboards/</code> or <code>src/analytics/</code>, depending on which screen it's on.</td></tr>
+      <tr><td>Add realistic demo data for testing</td><td><code>prisma/seed.ts</code>, then run <code>npm run db:seed</code>.</td></tr>
+    </table>
+  </div>
+
+  <!-- ================================================================ -->
+  <h2 id="deps"><span class="num">6</span>What's in <code>node_modules</code> — direct dependencies only</h2>
+  <p><code>node_modules</code> will contain hundreds, maybe thousands, of folders. The overwhelming majority are <strong>indirect</strong> — things the packages below needed, which needed other things, and so on, automatically. You will essentially never open one of those by hand, and this document doesn't attempt to catalog them.</p>
+  <p>What follows is every package this project's <code>package.json</code> <em>directly</em> chose to install, in plain language.</p>
+
+  <h3>Runtime dependencies <span style="font-weight:400;color:var(--text3);font-size:14px">— needed for the app to actually work while it's running</span></h3>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Package</th><th>What it is / does in this project</th><th></th></tr>
+      <tr><td><code>@nestjs/common</code></td><td>The core toolbox of NestJS — the <code>@Controller</code>, <code>@Injectable</code>, error types, and other building blocks used in nearly every file under <code>src/</code>.</td><td><span class="badge runtime">runtime</span></td></tr>
+      <tr><td><code>@nestjs/config</code></td><td>Loads settings (like the database connection string and JWT secrets) from an environment file, and makes them available anywhere via <code>ConfigService</code>.</td><td><span class="badge runtime">runtime</span></td></tr>
+      <tr><td><code>@nestjs/core</code></td><td>The actual engine that runs the whole backend — starts it up, wires all the feature modules together, and routes incoming requests to the right controller.</td><td><span class="badge runtime">runtime</span></td></tr>
+      <tr><td><code>@nestjs/jwt</code></td><td>Creates and verifies the signed login tokens (JWTs). Used directly in <code>auth.service.ts</code> to issue access/refresh tokens on login.</td><td><span class="badge runtime">runtime</span></td></tr>
+      <tr><td><code>@nestjs/passport</code></td><td>A thin bridge that plugs the <code>passport</code> authentication library (below) into NestJS's request-handling system.</td><td><span class="badge runtime">runtime</span></td></tr>
+      <tr><td><code>@nestjs/platform-express</code></td><td>The actual web server engine (Express) that NestJS runs on top of — it's what listens on port 3000 and serves the <code>public/</code> folder.</td><td><span class="badge runtime">runtime</span></td></tr>
+      <tr><td><code>@prisma/client</code></td><td>The generated, type-safe code this project uses to actually read and write the database — every <code>this.prisma.xxxxx.findMany(...)</code> call in the service files goes through this.</td><td><span class="badge runtime">runtime</span></td></tr>
+      <tr><td><code>bcryptjs</code></td><td>Securely scrambles ("hashes") passwords before they're stored, and checks a typed-in password against that scrambled version at login — so the real password is never saved anywhere.</td><td><span class="badge runtime">runtime</span></td></tr>
+      <tr><td><code>class-transformer</code></td><td>Converts the raw JSON text of an incoming request into a proper typed object (a DTO), working alongside <code>class-validator</code> below.</td><td><span class="badge runtime">runtime</span></td></tr>
+      <tr><td><code>class-validator</code></td><td>Powers the <code>@IsString()</code>, <code>@IsEmail()</code>, <code>@IsNumber()</code>-style decorators seen in every <code>dto.ts</code> file — this is what actually rejects bad input before it reaches your logic.</td><td><span class="badge runtime">runtime</span></td></tr>
+      <tr><td><code>passport</code></td><td>A widely-used authentication framework; provides the general plumbing that specific "strategies" (like the JWT one below) plug into.</td><td><span class="badge runtime">runtime</span></td></tr>
+      <tr><td><code>passport-jwt</code></td><td>The specific strategy that pulls the access token out of each incoming request and verifies it — this is what's actually running behind the scenes on every request after login.</td><td><span class="badge runtime">runtime</span></td></tr>
+      <tr><td><code>reflect-metadata</code></td><td>A low-level library required for decorators (the <code>@Controller</code>, <code>@Roles</code>, <code>@IsString</code> syntax used everywhere) to work at all. You'll never call it directly — it just needs to be present.</td><td><span class="badge runtime">runtime</span></td></tr>
+      <tr><td><code>rxjs</code></td><td>A library for handling asynchronous events, used internally by NestJS's own machinery. Nothing in this project's own code imports it directly — it's a supporting dependency of the framework itself, not something used hands-on here.</td><td><span class="badge runtime">runtime</span></td></tr>
+    </table>
+  </div>
+
+  <h3>Development-only dependencies <span style="font-weight:400;color:var(--text3);font-size:14px">— tools used while building/working on the project, not needed for it to run</span></h3>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Package</th><th>What it is / does in this project</th><th></th></tr>
+      <tr><td><code>@nestjs/cli</code></td><td>Provides the <code>nest</code> command itself — this is what actually runs behind <code>npm run build</code>, <code>npm run start</code>, and <code>npm run start:dev</code>.</td><td><span class="badge dev">dev-only</span></td></tr>
+      <tr><td><code>@nestjs/schematics</code></td><td>Code-generator templates for the <code>nest generate</code> command (e.g. auto-scaffolding a new feature folder). It's configured in <code>nest-cli.json</code> but none of this project's <code>package.json</code> scripts actually invoke <code>nest generate</code> — it's available if you use the command by hand, not something actively run.</td><td><span class="badge dev">dev-only</span></td></tr>
+      <tr><td><code>@types/bcryptjs</code></td><td>Type descriptions for <code>bcryptjs</code>, so the TypeScript compiler and your editor understand its functions. No effect on the running app.</td><td><span class="badge dev">dev-only</span></td></tr>
+      <tr><td><code>@types/express</code></td><td>Type descriptions for Express (see <code>@nestjs/platform-express</code> above).</td><td><span class="badge dev">dev-only</span></td></tr>
+      <tr><td><code>@types/node</code></td><td>Type descriptions for Node.js itself (file system, environment variables, etc).</td><td><span class="badge dev">dev-only</span></td></tr>
+      <tr><td><code>@types/passport-jwt</code></td><td>Type descriptions for <code>passport-jwt</code>.</td><td><span class="badge dev">dev-only</span></td></tr>
+      <tr><td><code>prisma</code></td><td>The Prisma <strong>command-line tool</strong> — this is the half that powers <code>npm run prisma:generate</code>, <code>prisma:migrate</code>, and <code>prisma:studio</code>. (<code>@prisma/client</code> above is the separate runtime half that the app actually uses while running.)</td><td><span class="badge dev">dev-only</span></td></tr>
+      <tr><td><code>ts-node</code></td><td>Lets Node.js run a <code>.ts</code> file directly without a separate compile step first — this is what makes <code>npm run db:seed</code> work, since <code>seed.ts</code> is never compiled into <code>dist/</code>.</td><td><span class="badge dev">dev-only</span></td></tr>
+      <tr><td><code>typescript</code></td><td>The TypeScript compiler itself — turns all the <code>.ts</code> files in <code>src/</code> into the plain JavaScript that actually runs, during <code>npm run build</code>.</td><td><span class="badge dev">dev-only</span></td></tr>
+    </table>
+  </div>
+
+  <p style="margin-top:18px">Everything else inside <code>node_modules</code> — likely hundreds of additional folders — is automatically-managed supporting code pulled in by the packages above. It never needs to be opened, read, or edited by hand.</p>
+
+  <div class="foot">
+    Generated as a static reference document at <code>docs/codebase-overview.html</code>. It is not linked from the running app and has no effect on its behavior — open it directly in a browser any time you need a refresher.
+  </div>
+
+</div>
+</body>
+</html>

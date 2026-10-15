@@ -1,0 +1,128 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Log in — Time Ops</title>
+  <link rel="stylesheet" href="styles.css">
+  <script>
+    // Set theme before paint to avoid a flash (cookie → OS preference).
+    (function () {
+      var m = document.cookie.match(/(?:^|; )theme=(light|dark)/);
+      var t = m ? m[1] : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
+</head>
+<body>
+  <div class="login-wrap">
+    <!-- Form column -->
+    <div class="login-form-col">
+      <div class="login-card">
+        <!-- Same emblem as the sidebar lockup, sized for the login card. The
+             .brand-dot tile is kept as its container so the existing spacing
+             and alignment rules still apply. -->
+        <div class="brand-mark"><span class="brand-dot">
+          <svg class="brand-mark-svg" viewBox="0 0 64 64" aria-hidden="true">
+            <circle cx="32" cy="32" r="29" /><circle cx="32" cy="32" r="22" />
+            <g class="brand-ticks">
+              <circle cx="32" cy="6.5" r="1.5" /><circle cx="45" cy="10" r="1.5" />
+              <circle cx="54" cy="19" r="1.5" /><circle cx="57.5" cy="32" r="1.5" />
+              <circle cx="54" cy="45" r="1.5" /><circle cx="45" cy="54" r="1.5" />
+              <circle cx="32" cy="57.5" r="1.5" /><circle cx="19" cy="54" r="1.5" />
+              <circle cx="10" cy="45" r="1.5" /><circle cx="6.5" cy="32" r="1.5" />
+              <circle cx="10" cy="19" r="1.5" /><circle cx="19" cy="10" r="1.5" />
+            </g>
+            <path d="M32 32 L18 20" /><path d="M32 32 L46 20" /><path d="M32 32 L32 46" />
+            <circle class="brand-pivot" cx="32" cy="32" r="3" />
+          </svg>
+        </span> <span class="brand-word-login">TIME OPS</span></div>
+        <h1>Welcome back</h1>
+        <p class="sub">Log in to continue</p>
+
+        <form id="loginForm">
+          <div class="field">
+            <label for="email">Email</label>
+            <input type="email" id="email" placeholder="you@company.com" required>
+          </div>
+          <div class="field">
+            <label for="password">Password</label>
+            <input type="password" id="password" placeholder="••••••••" required>
+          </div>
+          <p id="error" class="danger-text"></p>
+          <button type="submit" class="btn btn-primary" style="width:100%">Log in</button>
+        </form>
+
+        <p class="hint">Demo (password <code>password123</code>): admin@ · ceo@ · pm@ · lead@ · member@demo.local</p>
+      </div>
+    </div>
+
+    <!-- Testimonial panel: sliding rows up top, brand copy at the bottom (hidden on narrow screens). -->
+    <aside class="login-brand" aria-hidden="true">
+      <div class="marquee-stack">
+        <div class="marquee">
+          <div class="marquee-track" data-marquee>
+            <div class="quote-card"><p>"Approvals that used to take a full afternoon now close in minutes."</p><div class="quote-who"><span class="quote-av">P</span><span><span class="quote-name">Priya N.</span><br><span class="quote-role">Project Manager</span></span></div></div>
+            <div class="quote-card"><p>"I log my hours on one screen and always know where they stand."</p><div class="quote-who"><span class="quote-av">M</span><span><span class="quote-name">Marco T.</span><br><span class="quote-role">Team Member</span></span></div></div>
+            <div class="quote-card"><p>"Where every hour goes across the company is finally obvious."</p><div class="quote-who"><span class="quote-av">D</span><span><span class="quote-name">Dana R.</span><br><span class="quote-role">CEO</span></span></div></div>
+            <div class="quote-card"><p>"Chasing missing timesheets is no longer part of my week."</p><div class="quote-who"><span class="quote-av">S</span><span><span class="quote-name">Sam K.</span><br><span class="quote-role">Project Manager</span></span></div></div>
+          </div>
+        </div>
+        <div class="marquee reverse">
+          <div class="marquee-track" data-marquee>
+            <div class="quote-card"><p>"My team's weekly workload is visible at a single glance."</p><div class="quote-who"><span class="quote-av">A</span><span><span class="quote-name">Aisha B.</span><br><span class="quote-role">Team Lead</span></span></div></div>
+            <div class="quote-card"><p>"Locking a week at submit removed all the back-and-forth."</p><div class="quote-who"><span class="quote-av">L</span><span><span class="quote-name">Leo M.</span><br><span class="quote-role">Team Member</span></span></div></div>
+            <div class="quote-card"><p>"I can see exactly which hours landed on which task."</p><div class="quote-who"><span class="quote-av">R</span><span><span class="quote-name">Rhea D.</span><br><span class="quote-role">Project Manager</span></span></div></div>
+            <div class="quote-card"><p>"Requesting a correction on a locked week takes seconds now."</p><div class="quote-who"><span class="quote-av">O</span><span><span class="quote-name">Omar F.</span><br><span class="quote-role">Team Member</span></span></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="brand-info">
+        <h2 class="brand-lead">Every hour, logged and<br><em>approved</em> — in one place.</h2>
+        <p class="brand-sub">Timesheets, approvals and progress tracking for the whole team.</p>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    // Duplicate each row's cards so the -50% keyframe lands exactly on the start
+    // of the second copy — a seamless, gap-free horizontal loop.
+    document.querySelectorAll('[data-marquee]').forEach(function (track) {
+      track.innerHTML += track.innerHTML;
+    });
+  </script>
+
+  <script>
+    const form = document.getElementById('loginForm');
+    const errorEl = document.getElementById('error');
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorEl.textContent = '';
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: document.getElementById('email').value,
+            password: document.getElementById('password').value,
+          }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          errorEl.textContent = body.message || 'Invalid credentials';
+          return;
+        }
+        const data = await res.json();
+        // Role comes from the server-issued JWT, never from user input.
+        sessionStorage.setItem('jwt', data.accessToken);
+        sessionStorage.setItem('refresh', data.refreshToken);
+        sessionStorage.setItem('user', JSON.stringify(data.user));
+        location.href = 'app.html';
+      } catch (err) {
+        errorEl.textContent = 'Network error: ' + err.message;
+      }
+    });
+  </script>
+</body>
+</html>

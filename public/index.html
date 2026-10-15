@@ -1,0 +1,10 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Time Ops</title></head>
+<body>
+<script>
+  // Entry point: bounce to the app if already authenticated, else to login.
+  location.replace(sessionStorage.getItem('jwt') ? 'app.html' : 'login.html');
+</script>
+</body>
+</html>

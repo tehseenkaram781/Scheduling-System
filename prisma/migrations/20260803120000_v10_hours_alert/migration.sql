@@ -1,0 +1,12 @@
+-- v10 — Friday under-40-hours alert.
+--
+-- Adds the HOURS_ALERT notification type. Fired by the scheduled job in
+-- src/alerts/ when a person's week is tracking under WEEK_TARGET_HOURS and the
+-- week is still editable (no Approval row, or a REVERTED one).
+--
+-- The notification's related_entity_id carries the week-start date (YYYY-MM-DD)
+-- rather than a foreign key: there is no row to point at (the whole point is
+-- that the week has NOT been submitted, so no Approval exists yet). That value
+-- doubles as the idempotency key — one alert per user per week — and as the
+-- deep-link target the Inbox uses to open that week's timesheet.
+ALTER TYPE "NotificationType" ADD VALUE 'HOURS_ALERT';

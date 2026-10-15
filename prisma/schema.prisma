@@ -1,0 +1,494 @@
+// Enterprise Scheduling & Timesheet System — Phase 1 schema
+// Preserves the entities, fields, relationships and rules from the master build prompt.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  // System-level role: bootstraps accounts + teams, zero business-data access.
+  ADMIN
+  CEO
+  PM
+  TEAM_LEAD
+  TEAM_MEMBER
+}
+
+// Per-user rendering preference only — never a storage or validation unit.
+enum DisplayUnit {
+  HOURS
+  DAYS
+}
+
+enum EntryType {
+  WORK
+  LEAVE_SICK
+  LEAVE_VACATION
+  LEAVE_HOLIDAY
+}
+
+enum TimeEntryStatus {
+  PENDING
+  APPROVED
+}
+
+enum EditRequestStatus {
+  PENDING
+  APPROVED
+  DENIED
+}
+
+enum ApprovalStatus {
+  // Row is created on submit (locks the week). No row = draft/open (editable).
+  SUBMITTED
+  APPROVED
+  REVERTED // reopened by an approved edit request or PM "request changes" — unlocked, must re-submit
+}
+
+enum NotificationType {
+  ASSIGNMENT
+  SUBMISSION
+  APPROVAL
+  EDIT_REQUEST
+  EDIT_RESOLVED
+  // v3 additions — team lifecycle, role changes, membership
+  TEAM
+  ROLE_CHANGE
+  MEMBERSHIP
+  // v6 — account created / password reset (informational, not actionable)
+  ACCOUNT
+  // v7 — a picked timesheet row auto-removed for inactivity (informational)
+  TIMESHEET
+  // v9 — member-requested task creation. TASK_REQUEST is actionable (the
+  // project's lead approves/denies/sends back inline); TASK_REQUEST_RESOLVED is
+  // the informational outcome sent to the requester and to PMs.
+  TASK_REQUEST
+  TASK_REQUEST_RESOLVED
+  // v10 — Friday nudge when a week is tracking under a full 40h and is still
+  // editable. High-urgency in the UI, but informational: it never blocks a
+  // legitimately short week (partial leave, etc.) from being submitted.
+  HOURS_ALERT
+}
+
+// Summary-table period granularity for analytics aggregation.
+enum SummaryPeriod {
+  WEEK
+  MONTH
+}
+
+// ---------------------------------------------------------------------------
+// Core entities
+// ---------------------------------------------------------------------------
+
+model User {
+  id                 String    @id @default(uuid())
+  name               String
+  email              String    @unique
+  passwordHash       String    @map("password_hash")
+  role               Role
+  // v10 — self-service profile picture. Stored as a small data: URL rather than
+  // a file path: the app has no upload/object-storage layer, and the image is
+  // downscaled to 256px client-side before it is sent, so rows stay small.
+  // Null = fall back to the initials avatar (the default for every account).
+  avatarUrl          String?   @map("avatar_url")
+  // v11 — personal display-unit preference. DISPLAY ONLY: every duration is
+  // still stored, entered and validated in hours (see TimeEntry.hours and the
+  // 24h/day + 40h/week caps). This only changes how an already-stored value is
+  // rendered back to this one user, at 8h = 1 day.
+  displayUnit        DisplayUnit @default(HOURS) @map("display_unit")
+  // v6 — Admin-managed account lifecycle.
+  createdById        String?   @map("created_by") // Admin who created the account (null for seed)
+  mustChangePassword Boolean   @default(true) @map("must_change_password")
+  deactivatedAt      DateTime? @map("deactivated_at") // Admin soft-disable — blocks login, keeps history
+  deletedAt          DateTime? @map("deleted_at") // Admin soft-delete — also hides from all pickers
+  createdAt          DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  createdBy                  User?                         @relation("UserCreatedBy", fields: [createdById], references: [id])
+  usersCreated               User[]                        @relation("UserCreatedBy")
+  projectsCreated            Project[]                     @relation("ProjectCreatedBy")
+  subtasksCreated            Subtask[]                     @relation("SubtaskCreatedBy")
+  // v6 fix — Team Lead is now assigned at the Project level (was per-subtask).
+  projectsLed                Project[]                     @relation("ProjectLead")
+  projectLeadAssignments     ProjectTeamLeadAssignment[]   @relation("PTLAssignmentLead")
+  projectLeadAssignmentsMade ProjectTeamLeadAssignment[]   @relation("PTLAssignmentAssignedBy")
+  teamMemberAssignments      SubtaskTeamMemberAssignment[] @relation("TMAssignmentMember")
+  teamMemberAssignmentsMade  SubtaskTeamMemberAssignment[] @relation("TMAssignmentAssignedBy")
+  timeEntries                TimeEntry[]
+  timesheetRows              TimesheetRow[]
+  editRequestsMade           TimeEntryEditRequest[]        @relation("EditRequestRequestedBy")
+  editRequestsReviewed       TimeEntryEditRequest[]        @relation("EditRequestReviewedBy")
+  approvalsOwned             Approval[]                    @relation("ApprovalUser")
+  approvalsMade              Approval[]                    @relation("ApprovalApprovedBy")
+  notifications              Notification[]
+  auditLogs                  AuditLog[]
+
+  // v3 — teams, memberships, role changes
+  teamsLed             Team[]           @relation("TeamLead")
+  teamsCreated         Team[]           @relation("TeamCreatedBy")
+  taskRequestsMade     TaskRequest[]    @relation("TaskRequestRequestedBy")
+  taskRequestsReviewed TaskRequest[]    @relation("TaskRequestReviewedBy")
+  subtasksRequested    Subtask[]        @relation("SubtaskRequestedBy")
+  subtasksApproved     Subtask[]        @relation("SubtaskApprovedBy")
+  teamMemberships      TeamMembership[] @relation("MembershipUser")
+  teamMembershipsAdded TeamMembership[] @relation("MembershipAddedBy")
+  roleChanges          RoleChangeLog[]  @relation("RoleChangeUser")
+  roleChangesMade      RoleChangeLog[]  @relation("RoleChangeBy")
+
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// v3 — Teams, memberships, role-change history
+// ---------------------------------------------------------------------------
+
+model Team {
+  id          String    @id @default(uuid())
+  name        String
+  teamLeadId  String?   @map("team_lead_id") // nullable — may be briefly leaderless
+  createdById String    @map("created_by") // PM
+  createdAt   DateTime  @default(now()) @map("created_at")
+  deletedAt   DateTime? @map("deleted_at") // soft delete — preserves history
+
+  teamLead    User?            @relation("TeamLead", fields: [teamLeadId], references: [id])
+  createdBy   User             @relation("TeamCreatedBy", fields: [createdById], references: [id])
+  memberships TeamMembership[]
+
+  @@index([teamLeadId])
+  @@map("teams")
+}
+
+model TeamMembership {
+  id        String    @id @default(uuid())
+  teamId    String    @map("team_id")
+  userId    String    @map("user_id")
+  addedById String    @map("added_by") // team_lead_id
+  addedAt   DateTime  @default(now()) @map("added_at")
+  removedAt DateTime? @map("removed_at") // soft-remove — preserves history
+
+  team    Team @relation(fields: [teamId], references: [id])
+  user    User @relation("MembershipUser", fields: [userId], references: [id])
+  addedBy User @relation("MembershipAddedBy", fields: [addedById], references: [id])
+
+  @@index([teamId])
+  @@index([userId])
+  @@map("team_memberships")
+}
+
+model RoleChangeLog {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  oldRole     Role     @map("old_role")
+  newRole     Role     @map("new_role")
+  changedById String   @map("changed_by") // PM only
+  reason      String?  @db.Text
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user      User @relation("RoleChangeUser", fields: [userId], references: [id])
+  changedBy User @relation("RoleChangeBy", fields: [changedById], references: [id])
+
+  @@index([userId])
+  @@map("role_change_logs")
+}
+
+model Client {
+  id       String    @id @default(uuid())
+  name     String
+  projects Project[]
+
+  @@map("clients")
+}
+
+model Project {
+  id          String    @id @default(uuid())
+  clientId    String    @map("client_id")
+  name        String
+  deadline    DateTime?
+  createdById String    @map("created_by") // CEO only (enforced in service layer)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  // v3 — soft archive
+  archivedAt  DateTime? @map("archived_at")
+  // v6 fix — one Team Lead owns the whole project (nullable, reassignable like Team).
+  teamLeadId  String?   @map("team_lead_id")
+
+  client          Client                      @relation(fields: [clientId], references: [id])
+  createdBy       User                        @relation("ProjectCreatedBy", fields: [createdById], references: [id])
+  teamLead        User?                       @relation("ProjectLead", fields: [teamLeadId], references: [id])
+  leadAssignments ProjectTeamLeadAssignment[]
+  subtasks        Subtask[]
+  taskRequests    TaskRequest[]
+  timeEntries     TimeEntry[]
+  timesheetRows   TimesheetRow[]
+
+  @@index([clientId])
+  @@index([teamLeadId])
+  @@map("projects")
+}
+
+model Subtask {
+  id             String    @id @default(uuid())
+  projectId      String    @map("project_id")
+  name           String
+  deadline       DateTime?
+  estimatedHours Decimal   @map("estimated_hours") @db.Decimal(10, 2)
+  createdById    String    @map("created_by") // PM directly, or the approving Lead via a TaskRequest
+  // Provenance for member-requested tasks (v9). Both null for a normal PM-created
+  // task, so "came from a member request" is distinguishable in the audit trail.
+  requestedById  String?   @map("requested_by")
+  approvedById   String?   @map("approved_by")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  deletedAt      DateTime? @map("deleted_at") // PM soft-delete — hides from all pickers; history preserved
+
+  project               Project                       @relation(fields: [projectId], references: [id])
+  createdBy             User                          @relation("SubtaskCreatedBy", fields: [createdById], references: [id])
+  requestedBy           User?                         @relation("SubtaskRequestedBy", fields: [requestedById], references: [id])
+  approvedBy            User?                         @relation("SubtaskApprovedBy", fields: [approvedById], references: [id])
+  teamMemberAssignments SubtaskTeamMemberAssignment[]
+  timeEntries           TimeEntry[]
+  timesheetRows         TimesheetRow[]
+  fromRequests          TaskRequest[]                 @relation("SubtaskFromRequest")
+
+  @@index([projectId])
+  @@map("subtasks")
+}
+
+enum TaskRequestStatus {
+  PENDING
+  APPROVED
+  DENIED
+  CHANGES_REQUESTED
+}
+
+/// A Team Member's proposal for a new task under a project. Reviewed by that
+/// project's CURRENT Team Lead (never the PM) — approving creates the real
+/// Subtask. CHANGES_REQUESTED sends it back for editing rather than closing it,
+/// so a resubmit reuses this row instead of starting over.
+model TaskRequest {
+  id                     String            @id @default(uuid())
+  projectId              String            @map("project_id")
+  requestedById          String            @map("requested_by")
+  proposedName           String            @map("proposed_name")
+  proposedEstimatedHours Decimal?          @map("proposed_estimated_hours") @db.Decimal(10, 2)
+  reason                 String            @db.Text
+  status                 TaskRequestStatus @default(PENDING)
+  reviewedById           String?           @map("reviewed_by")
+  // Required for DENIED / CHANGES_REQUESTED (enforced in the service layer);
+  // optional on APPROVED, since a lead may approve without comment.
+  reviewNote             String?           @map("review_note") @db.Text
+  reviewedAt             DateTime?         @map("reviewed_at")
+  // Set once approved — the Subtask this request produced.
+  createdSubtaskId       String?           @map("created_subtask_id")
+  createdAt              DateTime          @default(now()) @map("created_at")
+
+  project        Project  @relation(fields: [projectId], references: [id])
+  requestedBy    User     @relation("TaskRequestRequestedBy", fields: [requestedById], references: [id])
+  reviewedBy     User?    @relation("TaskRequestReviewedBy", fields: [reviewedById], references: [id])
+  createdSubtask Subtask? @relation("SubtaskFromRequest", fields: [createdSubtaskId], references: [id])
+
+  @@index([projectId, status])
+  @@index([requestedById])
+  @@map("task_requests")
+}
+
+// v6 fix — Team Lead is assigned once at the Project level (was per-subtask).
+// First-class record so reassignment history ("who led this project when") is
+// preserved, mirroring how Team Lead reassignment is tracked for Teams.
+model ProjectTeamLeadAssignment {
+  id           String    @id @default(uuid())
+  projectId    String    @map("project_id")
+  teamLeadId   String    @map("team_lead_id")
+  assignedById String    @map("assigned_by") // PM
+  assignedAt   DateTime  @default(now()) @map("assigned_at")
+  unassignedAt DateTime? @map("unassigned_at") // nullable — preserves history
+
+  project    Project @relation(fields: [projectId], references: [id])
+  teamLead   User    @relation("PTLAssignmentLead", fields: [teamLeadId], references: [id])
+  assignedBy User    @relation("PTLAssignmentAssignedBy", fields: [assignedById], references: [id])
+
+  @@index([projectId])
+  @@index([teamLeadId])
+  @@map("project_team_lead_assignments")
+}
+
+model SubtaskTeamMemberAssignment {
+  id           String    @id @default(uuid())
+  subtaskId    String    @map("subtask_id")
+  teamMemberId String    @map("team_member_id")
+  assignedById String    @map("assigned_by") // team_lead_id
+  assignedAt   DateTime  @default(now()) @map("assigned_at")
+  unassignedAt DateTime? @map("unassigned_at") // nullable — preserves history
+
+  subtask    Subtask @relation(fields: [subtaskId], references: [id])
+  teamMember User    @relation("TMAssignmentMember", fields: [teamMemberId], references: [id])
+  assignedBy User    @relation("TMAssignmentAssignedBy", fields: [assignedById], references: [id])
+
+  @@index([subtaskId])
+  @@index([teamMemberId])
+  @@map("subtask_team_member_assignments")
+}
+
+model TimeEntry {
+  id             String          @id @default(uuid())
+  subtaskId      String?         @map("subtask_id") // null if leave entry or project-level entry
+  // Set for project-level entries (subtask_id null) — general/overhead time logged
+  // by roles without a specific subtask assignment. Mutually exclusive with subtaskId;
+  // both null only for LEAVE entries.
+  projectId      String?         @map("project_id")
+  userId         String          @map("user_id")
+  date           DateTime        @db.Date
+  hours          Decimal         @db.Decimal(6, 2)
+  entryType      EntryType       @map("entry_type")
+  billable       Boolean         @default(true)
+  notes          String?         @db.Text
+  // Legacy: hours were snapped to 15-minute boundaries. Entries are now stored
+  // exactly as entered, so this is always false for new/updated rows; it is kept
+  // so historical rows still record that their value was altered on the way in.
+  roundedTo15Min Boolean         @default(false) @map("rounded_to_15min")
+  // Set while a timer is running; cleared (with hours computed) on stop.
+  timerStartedAt DateTime?       @map("timer_started_at")
+  status         TimeEntryStatus @default(PENDING)
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+
+  subtask      Subtask?               @relation(fields: [subtaskId], references: [id])
+  project      Project?               @relation(fields: [projectId], references: [id])
+  user         User                   @relation(fields: [userId], references: [id])
+  editRequests TimeEntryEditRequest[]
+
+  @@index([userId])
+  @@index([subtaskId])
+  @@index([projectId])
+  @@index([date])
+  @@map("time_entries")
+}
+
+// v8 — a WEEK-SCOPED timesheet row marker. A row is a subtask OR a project-level
+// (general) target the user has added to ONE specific week's Table view. Rows no
+// longer persist across weeks: a fresh week starts with none, and the user adds
+// them (via the + picker or "Copy from previous week"). The row simply records
+// "show this target as a row for this week" — the actual logged time lives in
+// TimeEntry. A target with real TimeEntries in the week also renders even without
+// a marker (covers historical/submitted weeks). Leave is implicit and never
+// stored here. Exactly one of subtaskId / projectId is set — enforced in the
+// service layer.
+model TimesheetRow {
+  id            String   @id @default(uuid())
+  userId        String   @map("user_id")
+  subtaskId     String?  @map("subtask_id")
+  projectId     String?  @map("project_id") // set for a general/project-level row
+  weekStartDate DateTime @map("week_start_date") @db.Date // Monday (UTC) of the row's week
+  addedAt       DateTime @default(now()) @map("added_at")
+
+  user    User     @relation(fields: [userId], references: [id])
+  subtask Subtask? @relation(fields: [subtaskId], references: [id])
+  project Project? @relation(fields: [projectId], references: [id])
+
+  // NULLs are distinct in Postgres, so these guard against duplicate markers of the
+  // same target in the same week without blocking multiple subtask-rows (projectId
+  // null) or multiple project-rows (subtaskId null) per user/week.
+  @@unique([userId, subtaskId, weekStartDate])
+  @@unique([userId, projectId, weekStartDate])
+  @@index([userId, weekStartDate])
+  @@map("timesheet_rows")
+}
+
+model TimeEntryEditRequest {
+  id            String            @id @default(uuid())
+  timeEntryId   String            @map("time_entry_id")
+  requestedById String            @map("requested_by")
+  oldValue      Json              @map("old_value")
+  proposedValue Json              @map("proposed_value")
+  reason        String            @db.Text
+  status        EditRequestStatus @default(PENDING)
+  reviewedById  String?           @map("reviewed_by")
+  reviewedAt    DateTime?         @map("reviewed_at")
+
+  timeEntry   TimeEntry @relation(fields: [timeEntryId], references: [id])
+  requestedBy User      @relation("EditRequestRequestedBy", fields: [requestedById], references: [id])
+  reviewedBy  User?     @relation("EditRequestReviewedBy", fields: [reviewedById], references: [id])
+
+  @@index([timeEntryId])
+  @@index([status])
+  @@map("time_entry_edit_requests")
+}
+
+model Approval {
+  id            String         @id @default(uuid())
+  weekStartDate DateTime       @map("week_start_date") @db.Date
+  userId        String         @map("user_id") // whose timesheet
+  approvedById  String?        @map("approved_by") // PM
+  // A row exists only once a week is submitted, so SUBMITTED is the natural default.
+  status        ApprovalStatus @default(SUBMITTED)
+  approvedAt    DateTime?      @map("approved_at")
+  revertedAt    DateTime?      @map("reverted_at") // set when reopened (edit request / request changes)
+
+  user       User  @relation("ApprovalUser", fields: [userId], references: [id])
+  approvedBy User? @relation("ApprovalApprovedBy", fields: [approvedById], references: [id])
+
+  @@unique([userId, weekStartDate])
+  @@index([userId])
+  @@map("approvals")
+}
+
+model Notification {
+  id              String           @id @default(uuid())
+  userId          String           @map("user_id") // recipient
+  type            NotificationType
+  message         String
+  relatedEntityId String?          @map("related_entity_id")
+  read            Boolean          @default(false)
+  // Actionable notifications (SUBMISSION, EDIT_REQUEST) expose inline approve/deny
+  // buttons; resolved flips true once acted on so the buttons hide but the row stays.
+  actionable      Boolean          @default(false)
+  resolved        Boolean          @default(false)
+  createdAt       DateTime         @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String   @map("actor_id")
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  oldValue   Json?    @map("old_value")
+  newValue   Json?    @map("new_value")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  actor User @relation(fields: [actorId], references: [id])
+
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
+
+// ---------------------------------------------------------------------------
+// v3 Phase 5a — analytics summary tables (recomputed on state transitions)
+// ---------------------------------------------------------------------------
+
+model ProjectHoursSummary {
+  id            String        @id @default(uuid())
+  projectId     String        @map("project_id")
+  period        String // ISO period key: "2026-07" (month) or "2026-W29" (week)
+  periodType    SummaryPeriod @map("period_type")
+  totalHours    Decimal       @default(0) @map("total_hours") @db.Decimal(12, 2)
+  pendingHours  Decimal       @default(0) @map("pending_hours") @db.Decimal(12, 2)
+  approvedHours Decimal       @default(0) @map("approved_hours") @db.Decimal(12, 2)
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  @@unique([projectId, period, periodType])
+  @@index([projectId])
+  @@map("project_hours_summaries")
+}
